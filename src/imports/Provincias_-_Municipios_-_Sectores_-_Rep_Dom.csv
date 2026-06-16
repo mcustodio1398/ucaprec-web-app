@@ -1,0 +1,512 @@
+Provincia,Municipio,Sector
+Distrito Nacional,Distrito Nacional,Centro
+Distrito Nacional,Distrito Nacional,Los Jardines
+Distrito Nacional,Distrito Nacional,Villa Progreso
+Distrito Nacional,Distrito Nacional,Las Flores
+Distrito Nacional,Distrito Nacional,El Millón
+Distrito Nacional,Distrito Nacional,San Carlos
+Distrito Nacional,Distrito Nacional,Villa María
+Santo Domingo,Santo Domingo Este,Centro
+Santo Domingo,Santo Domingo Este,Los Jardines
+Santo Domingo,Santo Domingo Este,Villa Progreso
+Santo Domingo,Santo Domingo Este,Las Flores
+Santo Domingo,Santo Domingo Este,El Millón
+Santo Domingo,Santo Domingo Este,San Carlos
+Santo Domingo,Santo Domingo Este,Villa María
+Santo Domingo,Santo Domingo Norte,Centro
+Santo Domingo,Santo Domingo Norte,Los Jardines
+Santo Domingo,Santo Domingo Norte,Villa Progreso
+Santo Domingo,Santo Domingo Norte,Las Flores
+Santo Domingo,Santo Domingo Norte,El Millón
+Santo Domingo,Santo Domingo Norte,San Carlos
+Santo Domingo,Santo Domingo Norte,Villa María
+Santo Domingo,Santo Domingo Oeste,Centro
+Santo Domingo,Santo Domingo Oeste,Los Jardines
+Santo Domingo,Santo Domingo Oeste,Villa Progreso
+Santo Domingo,Santo Domingo Oeste,Las Flores
+Santo Domingo,Santo Domingo Oeste,El Millón
+Santo Domingo,Santo Domingo Oeste,San Carlos
+Santo Domingo,Santo Domingo Oeste,Villa María
+Santo Domingo,Boca Chica,Centro
+Santo Domingo,Boca Chica,Los Jardines
+Santo Domingo,Boca Chica,Villa Progreso
+Santo Domingo,Boca Chica,Las Flores
+Santo Domingo,Boca Chica,El Millón
+Santo Domingo,Boca Chica,San Carlos
+Santo Domingo,Boca Chica,Villa María
+Santo Domingo,Los Alcarrizos,Centro
+Santo Domingo,Los Alcarrizos,Los Jardines
+Santo Domingo,Los Alcarrizos,Villa Progreso
+Santo Domingo,Los Alcarrizos,Las Flores
+Santo Domingo,Los Alcarrizos,El Millón
+Santo Domingo,Los Alcarrizos,San Carlos
+Santo Domingo,Los Alcarrizos,Villa María
+Santo Domingo,Pedro Brand,Centro
+Santo Domingo,Pedro Brand,Los Jardines
+Santo Domingo,Pedro Brand,Villa Progreso
+Santo Domingo,Pedro Brand,Las Flores
+Santo Domingo,Pedro Brand,El Millón
+Santo Domingo,Pedro Brand,San Carlos
+Santo Domingo,Pedro Brand,Villa María
+Santiago,Santiago de los Caballeros,Centro
+Santiago,Santiago de los Caballeros,Los Jardines
+Santiago,Santiago de los Caballeros,Villa Progreso
+Santiago,Santiago de los Caballeros,Las Flores
+Santiago,Santiago de los Caballeros,El Millón
+Santiago,Santiago de los Caballeros,San Carlos
+Santiago,Santiago de los Caballeros,Villa María
+Santiago,Tamboril,Centro
+Santiago,Tamboril,Los Jardines
+Santiago,Tamboril,Villa Progreso
+Santiago,Tamboril,Las Flores
+Santiago,Tamboril,El Millón
+Santiago,Tamboril,San Carlos
+Santiago,Tamboril,Villa María
+Santiago,Villa González,Centro
+Santiago,Villa González,Los Jardines
+Santiago,Villa González,Villa Progreso
+Santiago,Villa González,Las Flores
+Santiago,Villa González,El Millón
+Santiago,Villa González,San Carlos
+Santiago,Villa González,Villa María
+Santiago,Licey al Medio,Centro
+Santiago,Licey al Medio,Los Jardines
+Santiago,Licey al Medio,Villa Progreso
+Santiago,Licey al Medio,Las Flores
+Santiago,Licey al Medio,El Millón
+Santiago,Licey al Medio,San Carlos
+Santiago,Licey al Medio,Villa María
+La Vega,La Vega,Centro
+La Vega,La Vega,Los Jardines
+La Vega,La Vega,Villa Progreso
+La Vega,La Vega,Las Flores
+La Vega,La Vega,El Millón
+La Vega,La Vega,San Carlos
+La Vega,La Vega,Villa María
+La Vega,Constanza,Centro
+La Vega,Constanza,Los Jardines
+La Vega,Constanza,Villa Progreso
+La Vega,Constanza,Las Flores
+La Vega,Constanza,El Millón
+La Vega,Constanza,San Carlos
+La Vega,Constanza,Villa María
+La Vega,Jarabacoa,Centro
+La Vega,Jarabacoa,Los Jardines
+La Vega,Jarabacoa,Villa Progreso
+La Vega,Jarabacoa,Las Flores
+La Vega,Jarabacoa,El Millón
+La Vega,Jarabacoa,San Carlos
+La Vega,Jarabacoa,Villa María
+La Vega,Jima Abajo,Centro
+La Vega,Jima Abajo,Los Jardines
+La Vega,Jima Abajo,Villa Progreso
+La Vega,Jima Abajo,Las Flores
+La Vega,Jima Abajo,El Millón
+La Vega,Jima Abajo,San Carlos
+La Vega,Jima Abajo,Villa María
+San Cristóbal,San Cristóbal,Centro
+San Cristóbal,San Cristóbal,Los Jardines
+San Cristóbal,San Cristóbal,Villa Progreso
+San Cristóbal,San Cristóbal,Las Flores
+San Cristóbal,San Cristóbal,El Millón
+San Cristóbal,San Cristóbal,San Carlos
+San Cristóbal,San Cristóbal,Villa María
+San Cristóbal,Bajos de Haina,Centro
+San Cristóbal,Bajos de Haina,Los Jardines
+San Cristóbal,Bajos de Haina,Villa Progreso
+San Cristóbal,Bajos de Haina,Las Flores
+San Cristóbal,Bajos de Haina,El Millón
+San Cristóbal,Bajos de Haina,San Carlos
+San Cristóbal,Bajos de Haina,Villa María
+San Cristóbal,Villa Altagracia,Centro
+San Cristóbal,Villa Altagracia,Los Jardines
+San Cristóbal,Villa Altagracia,Villa Progreso
+San Cristóbal,Villa Altagracia,Las Flores
+San Cristóbal,Villa Altagracia,El Millón
+San Cristóbal,Villa Altagracia,San Carlos
+San Cristóbal,Villa Altagracia,Villa María
+Puerto Plata,Puerto Plata,Centro
+Puerto Plata,Puerto Plata,Los Jardines
+Puerto Plata,Puerto Plata,Villa Progreso
+Puerto Plata,Puerto Plata,Las Flores
+Puerto Plata,Puerto Plata,El Millón
+Puerto Plata,Puerto Plata,San Carlos
+Puerto Plata,Puerto Plata,Villa María
+Puerto Plata,Sosúa,Centro
+Puerto Plata,Sosúa,Los Jardines
+Puerto Plata,Sosúa,Villa Progreso
+Puerto Plata,Sosúa,Las Flores
+Puerto Plata,Sosúa,El Millón
+Puerto Plata,Sosúa,San Carlos
+Puerto Plata,Sosúa,Villa María
+Puerto Plata,Cabarete,Centro
+Puerto Plata,Cabarete,Los Jardines
+Puerto Plata,Cabarete,Villa Progreso
+Puerto Plata,Cabarete,Las Flores
+Puerto Plata,Cabarete,El Millón
+Puerto Plata,Cabarete,San Carlos
+Puerto Plata,Cabarete,Villa María
+Puerto Plata,Imbert,Centro
+Puerto Plata,Imbert,Los Jardines
+Puerto Plata,Imbert,Villa Progreso
+Puerto Plata,Imbert,Las Flores
+Puerto Plata,Imbert,El Millón
+Puerto Plata,Imbert,San Carlos
+Puerto Plata,Imbert,Villa María
+Duarte,San Francisco de Macorís,Centro
+Duarte,San Francisco de Macorís,Los Jardines
+Duarte,San Francisco de Macorís,Villa Progreso
+Duarte,San Francisco de Macorís,Las Flores
+Duarte,San Francisco de Macorís,El Millón
+Duarte,San Francisco de Macorís,San Carlos
+Duarte,San Francisco de Macorís,Villa María
+Duarte,Arenoso,Centro
+Duarte,Arenoso,Los Jardines
+Duarte,Arenoso,Villa Progreso
+Duarte,Arenoso,Las Flores
+Duarte,Arenoso,El Millón
+Duarte,Arenoso,San Carlos
+Duarte,Arenoso,Villa María
+Duarte,Castillo,Centro
+Duarte,Castillo,Los Jardines
+Duarte,Castillo,Villa Progreso
+Duarte,Castillo,Las Flores
+Duarte,Castillo,El Millón
+Duarte,Castillo,San Carlos
+Duarte,Castillo,Villa María
+Duarte,Villa Riva,Centro
+Duarte,Villa Riva,Los Jardines
+Duarte,Villa Riva,Villa Progreso
+Duarte,Villa Riva,Las Flores
+Duarte,Villa Riva,El Millón
+Duarte,Villa Riva,San Carlos
+Duarte,Villa Riva,Villa María
+La Romana,La Romana,Centro
+La Romana,La Romana,Los Jardines
+La Romana,La Romana,Villa Progreso
+La Romana,La Romana,Las Flores
+La Romana,La Romana,El Millón
+La Romana,La Romana,San Carlos
+La Romana,La Romana,Villa María
+La Romana,Guaymate,Centro
+La Romana,Guaymate,Los Jardines
+La Romana,Guaymate,Villa Progreso
+La Romana,Guaymate,Las Flores
+La Romana,Guaymate,El Millón
+La Romana,Guaymate,San Carlos
+La Romana,Guaymate,Villa María
+La Romana,Villa Hermosa,Centro
+La Romana,Villa Hermosa,Los Jardines
+La Romana,Villa Hermosa,Villa Progreso
+La Romana,Villa Hermosa,Las Flores
+La Romana,Villa Hermosa,El Millón
+La Romana,Villa Hermosa,San Carlos
+La Romana,Villa Hermosa,Villa María
+San Pedro de Macorís,San Pedro de Macorís,Centro
+San Pedro de Macorís,San Pedro de Macorís,Los Jardines
+San Pedro de Macorís,San Pedro de Macorís,Villa Progreso
+San Pedro de Macorís,San Pedro de Macorís,Las Flores
+San Pedro de Macorís,San Pedro de Macorís,El Millón
+San Pedro de Macorís,San Pedro de Macorís,San Carlos
+San Pedro de Macorís,San Pedro de Macorís,Villa María
+San Pedro de Macorís,Quisqueya,Centro
+San Pedro de Macorís,Quisqueya,Los Jardines
+San Pedro de Macorís,Quisqueya,Villa Progreso
+San Pedro de Macorís,Quisqueya,Las Flores
+San Pedro de Macorís,Quisqueya,El Millón
+San Pedro de Macorís,Quisqueya,San Carlos
+San Pedro de Macorís,Quisqueya,Villa María
+San Pedro de Macorís,Consuelo,Centro
+San Pedro de Macorís,Consuelo,Los Jardines
+San Pedro de Macorís,Consuelo,Villa Progreso
+San Pedro de Macorís,Consuelo,Las Flores
+San Pedro de Macorís,Consuelo,El Millón
+San Pedro de Macorís,Consuelo,San Carlos
+San Pedro de Macorís,Consuelo,Villa María
+Azua,Azua de Compostela,Centro
+Azua,Azua de Compostela,Los Jardines
+Azua,Azua de Compostela,Villa Progreso
+Azua,Azua de Compostela,Las Flores
+Azua,Azua de Compostela,El Millón
+Azua,Azua de Compostela,San Carlos
+Azua,Azua de Compostela,Villa María
+Azua,Estebanía,Centro
+Azua,Estebanía,Los Jardines
+Azua,Estebanía,Villa Progreso
+Azua,Estebanía,Las Flores
+Azua,Estebanía,El Millón
+Azua,Estebanía,San Carlos
+Azua,Estebanía,Villa María
+Azua,Las Charcas,Centro
+Azua,Las Charcas,Los Jardines
+Azua,Las Charcas,Villa Progreso
+Azua,Las Charcas,Las Flores
+Azua,Las Charcas,El Millón
+Azua,Las Charcas,San Carlos
+Azua,Las Charcas,Villa María
+Barahona,Barahona,Centro
+Barahona,Barahona,Los Jardines
+Barahona,Barahona,Villa Progreso
+Barahona,Barahona,Las Flores
+Barahona,Barahona,El Millón
+Barahona,Barahona,San Carlos
+Barahona,Barahona,Villa María
+Barahona,Cabral,Centro
+Barahona,Cabral,Los Jardines
+Barahona,Cabral,Villa Progreso
+Barahona,Cabral,Las Flores
+Barahona,Cabral,El Millón
+Barahona,Cabral,San Carlos
+Barahona,Cabral,Villa María
+Barahona,Enriquillo,Centro
+Barahona,Enriquillo,Los Jardines
+Barahona,Enriquillo,Villa Progreso
+Barahona,Enriquillo,Las Flores
+Barahona,Enriquillo,El Millón
+Barahona,Enriquillo,San Carlos
+Barahona,Enriquillo,Villa María
+Monseñor Nouel,Bonao,Centro
+Monseñor Nouel,Bonao,Los Jardines
+Monseñor Nouel,Bonao,Villa Progreso
+Monseñor Nouel,Bonao,Las Flores
+Monseñor Nouel,Bonao,El Millón
+Monseñor Nouel,Bonao,San Carlos
+Monseñor Nouel,Bonao,Villa María
+Monseñor Nouel,Maimón,Centro
+Monseñor Nouel,Maimón,Los Jardines
+Monseñor Nouel,Maimón,Villa Progreso
+Monseñor Nouel,Maimón,Las Flores
+Monseñor Nouel,Maimón,El Millón
+Monseñor Nouel,Maimón,San Carlos
+Monseñor Nouel,Maimón,Villa María
+Monseñor Nouel,Piedra Blanca,Centro
+Monseñor Nouel,Piedra Blanca,Los Jardines
+Monseñor Nouel,Piedra Blanca,Villa Progreso
+Monseñor Nouel,Piedra Blanca,Las Flores
+Monseñor Nouel,Piedra Blanca,El Millón
+Monseñor Nouel,Piedra Blanca,San Carlos
+Monseñor Nouel,Piedra Blanca,Villa María
+Espaillat,Moca,Centro
+Espaillat,Moca,Los Jardines
+Espaillat,Moca,Villa Progreso
+Espaillat,Moca,Las Flores
+Espaillat,Moca,El Millón
+Espaillat,Moca,San Carlos
+Espaillat,Moca,Villa María
+Espaillat,Gaspar Hernández,Centro
+Espaillat,Gaspar Hernández,Los Jardines
+Espaillat,Gaspar Hernández,Villa Progreso
+Espaillat,Gaspar Hernández,Las Flores
+Espaillat,Gaspar Hernández,El Millón
+Espaillat,Gaspar Hernández,San Carlos
+Espaillat,Gaspar Hernández,Villa María
+Espaillat,Jamao al Norte,Centro
+Espaillat,Jamao al Norte,Los Jardines
+Espaillat,Jamao al Norte,Villa Progreso
+Espaillat,Jamao al Norte,Las Flores
+Espaillat,Jamao al Norte,El Millón
+Espaillat,Jamao al Norte,San Carlos
+Espaillat,Jamao al Norte,Villa María
+Peravia,Baní,Centro
+Peravia,Baní,Los Jardines
+Peravia,Baní,Villa Progreso
+Peravia,Baní,Las Flores
+Peravia,Baní,El Millón
+Peravia,Baní,San Carlos
+Peravia,Baní,Villa María
+Peravia,Nizao,Centro
+Peravia,Nizao,Los Jardines
+Peravia,Nizao,Villa Progreso
+Peravia,Nizao,Las Flores
+Peravia,Nizao,El Millón
+Peravia,Nizao,San Carlos
+Peravia,Nizao,Villa María
+Peravia,Matanzas,Centro
+Peravia,Matanzas,Los Jardines
+Peravia,Matanzas,Villa Progreso
+Peravia,Matanzas,Las Flores
+Peravia,Matanzas,El Millón
+Peravia,Matanzas,San Carlos
+Peravia,Matanzas,Villa María
+San Juan,San Juan de la Maguana,Centro
+San Juan,San Juan de la Maguana,Los Jardines
+San Juan,San Juan de la Maguana,Villa Progreso
+San Juan,San Juan de la Maguana,Las Flores
+San Juan,San Juan de la Maguana,El Millón
+San Juan,San Juan de la Maguana,San Carlos
+San Juan,San Juan de la Maguana,Villa María
+San Juan,Las Matas de Farfán,Centro
+San Juan,Las Matas de Farfán,Los Jardines
+San Juan,Las Matas de Farfán,Villa Progreso
+San Juan,Las Matas de Farfán,Las Flores
+San Juan,Las Matas de Farfán,El Millón
+San Juan,Las Matas de Farfán,San Carlos
+San Juan,Las Matas de Farfán,Villa María
+San Juan,El Cercado,Centro
+San Juan,El Cercado,Los Jardines
+San Juan,El Cercado,Villa Progreso
+San Juan,El Cercado,Las Flores
+San Juan,El Cercado,El Millón
+San Juan,El Cercado,San Carlos
+San Juan,El Cercado,Villa María
+Monte Plata,Monte Plata,Centro
+Monte Plata,Monte Plata,Los Jardines
+Monte Plata,Monte Plata,Villa Progreso
+Monte Plata,Monte Plata,Las Flores
+Monte Plata,Monte Plata,El Millón
+Monte Plata,Monte Plata,San Carlos
+Monte Plata,Monte Plata,Villa María
+Monte Plata,Sabana Grande de Boyá,Centro
+Monte Plata,Sabana Grande de Boyá,Los Jardines
+Monte Plata,Sabana Grande de Boyá,Villa Progreso
+Monte Plata,Sabana Grande de Boyá,Las Flores
+Monte Plata,Sabana Grande de Boyá,El Millón
+Monte Plata,Sabana Grande de Boyá,San Carlos
+Monte Plata,Sabana Grande de Boyá,Villa María
+Monte Plata,Peralvillo,Centro
+Monte Plata,Peralvillo,Los Jardines
+Monte Plata,Peralvillo,Villa Progreso
+Monte Plata,Peralvillo,Las Flores
+Monte Plata,Peralvillo,El Millón
+Monte Plata,Peralvillo,San Carlos
+Monte Plata,Peralvillo,Villa María
+Hermanas Mirabal,Salcedo,Centro
+Hermanas Mirabal,Salcedo,Los Jardines
+Hermanas Mirabal,Salcedo,Villa Progreso
+Hermanas Mirabal,Salcedo,Las Flores
+Hermanas Mirabal,Salcedo,El Millón
+Hermanas Mirabal,Salcedo,San Carlos
+Hermanas Mirabal,Salcedo,Villa María
+Hermanas Mirabal,Tenares,Centro
+Hermanas Mirabal,Tenares,Los Jardines
+Hermanas Mirabal,Tenares,Villa Progreso
+Hermanas Mirabal,Tenares,Las Flores
+Hermanas Mirabal,Tenares,El Millón
+Hermanas Mirabal,Tenares,San Carlos
+Hermanas Mirabal,Tenares,Villa María
+Hermanas Mirabal,Villa Tapia,Centro
+Hermanas Mirabal,Villa Tapia,Los Jardines
+Hermanas Mirabal,Villa Tapia,Villa Progreso
+Hermanas Mirabal,Villa Tapia,Las Flores
+Hermanas Mirabal,Villa Tapia,El Millón
+Hermanas Mirabal,Villa Tapia,San Carlos
+Hermanas Mirabal,Villa Tapia,Villa María
+El Seibo,El Seibo,Centro
+El Seibo,El Seibo,Los Jardines
+El Seibo,El Seibo,Villa Progreso
+El Seibo,El Seibo,Las Flores
+El Seibo,El Seibo,El Millón
+El Seibo,El Seibo,San Carlos
+El Seibo,El Seibo,Villa María
+El Seibo,Miches,Centro
+El Seibo,Miches,Los Jardines
+El Seibo,Miches,Villa Progreso
+El Seibo,Miches,Las Flores
+El Seibo,Miches,El Millón
+El Seibo,Miches,San Carlos
+El Seibo,Miches,Villa María
+Hato Mayor,Hato Mayor del Rey,Centro
+Hato Mayor,Hato Mayor del Rey,Los Jardines
+Hato Mayor,Hato Mayor del Rey,Villa Progreso
+Hato Mayor,Hato Mayor del Rey,Las Flores
+Hato Mayor,Hato Mayor del Rey,El Millón
+Hato Mayor,Hato Mayor del Rey,San Carlos
+Hato Mayor,Hato Mayor del Rey,Villa María
+Hato Mayor,Sabana de la Mar,Centro
+Hato Mayor,Sabana de la Mar,Los Jardines
+Hato Mayor,Sabana de la Mar,Villa Progreso
+Hato Mayor,Sabana de la Mar,Las Flores
+Hato Mayor,Sabana de la Mar,El Millón
+Hato Mayor,Sabana de la Mar,San Carlos
+Hato Mayor,Sabana de la Mar,Villa María
+Hato Mayor,El Valle,Centro
+Hato Mayor,El Valle,Los Jardines
+Hato Mayor,El Valle,Villa Progreso
+Hato Mayor,El Valle,Las Flores
+Hato Mayor,El Valle,El Millón
+Hato Mayor,El Valle,San Carlos
+Hato Mayor,El Valle,Villa María
+Sánchez Ramírez,Cotuí,Centro
+Sánchez Ramírez,Cotuí,Los Jardines
+Sánchez Ramírez,Cotuí,Villa Progreso
+Sánchez Ramírez,Cotuí,Las Flores
+Sánchez Ramírez,Cotuí,El Millón
+Sánchez Ramírez,Cotuí,San Carlos
+Sánchez Ramírez,Cotuí,Villa María
+Sánchez Ramírez,Cevicos,Centro
+Sánchez Ramírez,Cevicos,Los Jardines
+Sánchez Ramírez,Cevicos,Villa Progreso
+Sánchez Ramírez,Cevicos,Las Flores
+Sánchez Ramírez,Cevicos,El Millón
+Sánchez Ramírez,Cevicos,San Carlos
+Sánchez Ramírez,Cevicos,Villa María
+Sánchez Ramírez,Fantino,Centro
+Sánchez Ramírez,Fantino,Los Jardines
+Sánchez Ramírez,Fantino,Villa Progreso
+Sánchez Ramírez,Fantino,Las Flores
+Sánchez Ramírez,Fantino,El Millón
+Sánchez Ramírez,Fantino,San Carlos
+Sánchez Ramírez,Fantino,Villa María
+Valverde,Mao,Centro
+Valverde,Mao,Los Jardines
+Valverde,Mao,Villa Progreso
+Valverde,Mao,Las Flores
+Valverde,Mao,El Millón
+Valverde,Mao,San Carlos
+Valverde,Mao,Villa María
+Valverde,Esperanza,Centro
+Valverde,Esperanza,Los Jardines
+Valverde,Esperanza,Villa Progreso
+Valverde,Esperanza,Las Flores
+Valverde,Esperanza,El Millón
+Valverde,Esperanza,San Carlos
+Valverde,Esperanza,Villa María
+Valverde,Laguna Salada,Centro
+Valverde,Laguna Salada,Los Jardines
+Valverde,Laguna Salada,Villa Progreso
+Valverde,Laguna Salada,Las Flores
+Valverde,Laguna Salada,El Millón
+Valverde,Laguna Salada,San Carlos
+Valverde,Laguna Salada,Villa María
+Montecristi,Montecristi,Centro
+Montecristi,Montecristi,Los Jardines
+Montecristi,Montecristi,Villa Progreso
+Montecristi,Montecristi,Las Flores
+Montecristi,Montecristi,El Millón
+Montecristi,Montecristi,San Carlos
+Montecristi,Montecristi,Villa María
+Montecristi,Manzanillo,Centro
+Montecristi,Manzanillo,Los Jardines
+Montecristi,Manzanillo,Villa Progreso
+Montecristi,Manzanillo,Las Flores
+Montecristi,Manzanillo,El Millón
+Montecristi,Manzanillo,San Carlos
+Montecristi,Manzanillo,Villa María
+Montecristi,Villa Vásquez,Centro
+Montecristi,Villa Vásquez,Los Jardines
+Montecristi,Villa Vásquez,Villa Progreso
+Montecristi,Villa Vásquez,Las Flores
+Montecristi,Villa Vásquez,El Millón
+Montecristi,Villa Vásquez,San Carlos
+Montecristi,Villa Vásquez,Villa María
+Dajabón,Dajabón,Centro
+Dajabón,Dajabón,Los Jardines
+Dajabón,Dajabón,Villa Progreso
+Dajabón,Dajabón,Las Flores
+Dajabón,Dajabón,El Millón
+Dajabón,Dajabón,San Carlos
+Dajabón,Dajabón,Villa María
+Dajabón,Loma de Cabrera,Centro
+Dajabón,Loma de Cabrera,Los Jardines
+Dajabón,Loma de Cabrera,Villa Progreso
+Dajabón,Loma de Cabrera,Las Flores
+Dajabón,Loma de Cabrera,El Millón
+Dajabón,Loma de Cabrera,San Carlos
+Dajabón,Loma de Cabrera,Villa María
+Dajabón,Restauración,Centro
+Dajabón,Restauración,Los Jardines
+Dajabón,Restauración,Villa Progreso
+Dajabón,Restauración,Las Flores
+Dajabón,Restauración,El Millón
+Dajabón,Restauración,San Carlos
+Dajabón,Restauración,Villa María
