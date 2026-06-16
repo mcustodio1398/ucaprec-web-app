@@ -2907,64 +2907,213 @@ function DocumentsView({ setView }: { setView: (v: View) => void }) {
 // ─── Reports View ─────────────────────────────────────────────────────────────
 
 function ReportsView() {
+  const periodOptions = ["Todos", "Nov 2024", "Oct 2024", "2024 (completo)", "2023", "Personalizado"];
+  const analystOptions = ["Todos", "Ana Rodríguez", "Luis Peña", "María Santos", "Pedro Álvarez"];
+
+  const [periodFilter, setPeriodFilter] = useState("Todos");
+  const [jurisdictionFilter, setJurisdictionFilter] = useState("Todas");
+  const [analystFilter, setAnalystFilter] = useState("Todos");
+
   const reports = [
-    { name: "Expedientes por Estatus", desc: "Lista completa de expedientes agrupados por estado del imputado", icon: FolderOpen, color: "text-blue-600 bg-blue-50 dark:bg-blue-900/20" },
-    { name: "Prófugos y Rebeldes Activos", desc: "Reporte operativo de imputados en fuga o rebeldía con alertas vigentes", icon: UserX, color: "text-red-600 bg-red-50 dark:bg-red-900/20" },
-    { name: "Alertas Activas por Tipo", desc: "Consolidado de alertas rojas, migratorias y órdenes de arresto vigentes", icon: AlertOctagon, color: "text-amber-600 bg-amber-50 dark:bg-amber-900/20" },
-    { name: "Casos por Jurisdicción", desc: "Distribución geográfica de expedientes por provincia y municipio", icon: MapPin, color: "text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20" },
-    { name: "Casos por Analista", desc: "Carga de trabajo y rendimiento de analistas asignados", icon: Users, color: "text-violet-600 bg-violet-50 dark:bg-violet-900/20" },
-    { name: "Evolución Temporal", desc: "Tendencia de recepción e ingreso de casos en el tiempo", icon: TrendingUp, color: "text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20" },
-    { name: "Sanciones Económicas", desc: "Reporte de multas, decomisos, indemnizaciones y garantías económicas", icon: Scale, color: "text-teal-600 bg-teal-50 dark:bg-teal-900/20" },
-    { name: "Auditoría de Usuarios", desc: "Actividad de usuarios: accesos, modificaciones y exportaciones", icon: Database, color: "text-slate-600 bg-slate-50 dark:bg-slate-900/20" },
+    {
+      name: "Expedientes por Estatus",
+      desc: "Lista completa de expedientes agrupados por estado del imputado",
+      icon: FolderOpen,
+      color: "text-blue-600 bg-blue-50 dark:bg-blue-900/20",
+      periods: ["2024 (completo)", "Nov 2024", "Oct 2024"],
+      jurisdictions: ["Distrito Nacional", "Santo Domingo Este", "Santiago"],
+      analysts: ["Ana Rodríguez", "Luis Peña"],
+    },
+    {
+      name: "Prófugos y Rebeldes Activos",
+      desc: "Reporte operativo de imputados en fuga o rebeldía con alertas vigentes",
+      icon: UserX,
+      color: "text-red-600 bg-red-50 dark:bg-red-900/20",
+      periods: ["2024 (completo)", "Nov 2024"],
+      jurisdictions: ["Distrito Nacional", "Santo Domingo Oeste", "La Vega"],
+      analysts: ["María Santos", "Pedro Álvarez"],
+    },
+    {
+      name: "Alertas Activas por Tipo",
+      desc: "Consolidado de alertas rojas, migratorias y órdenes de arresto vigentes",
+      icon: AlertOctagon,
+      color: "text-amber-600 bg-amber-50 dark:bg-amber-900/20",
+      periods: ["2024 (completo)", "2023", "Nov 2024"],
+      jurisdictions: ["Santiago", "Distrito Nacional", "Puerto Plata"],
+      analysts: ["Ana Rodríguez", "Pedro Álvarez"],
+    },
+    {
+      name: "Casos por Jurisdicción",
+      desc: "Distribución geográfica de expedientes por provincia y municipio",
+      icon: MapPin,
+      color: "text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20",
+      periods: ["2024 (completo)", "2023"],
+      jurisdictions: ["Todas"],
+      analysts: ["Todos"],
+    },
+    {
+      name: "Casos por Analista",
+      desc: "Carga de trabajo y rendimiento de analistas asignados",
+      icon: Users,
+      color: "text-violet-600 bg-violet-50 dark:bg-violet-900/20",
+      periods: ["2024 (completo)", "Nov 2024", "Oct 2024", "2023"],
+      jurisdictions: ["Todas"],
+      analysts: ["Ana Rodríguez", "Luis Peña", "María Santos", "Pedro Álvarez"],
+    },
+    {
+      name: "Evolución Temporal",
+      desc: "Tendencia de recepción e ingreso de casos en el tiempo",
+      icon: TrendingUp,
+      color: "text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20",
+      periods: ["2024 (completo)", "2023", "Personalizado"],
+      jurisdictions: ["Todas"],
+      analysts: ["Todos"],
+    },
+    {
+      name: "Sanciones Económicas",
+      desc: "Reporte de multas, decomisos, indemnizaciones y garantías económicas",
+      icon: Scale,
+      color: "text-teal-600 bg-teal-50 dark:bg-teal-900/20",
+      periods: ["2024 (completo)", "2023", "Nov 2024"],
+      jurisdictions: ["La Vega", "Santiago", "Distrito Nacional"],
+      analysts: ["Luis Peña", "María Santos"],
+    },
+    {
+      name: "Auditoría de Usuarios",
+      desc: "Actividad de usuarios: accesos, modificaciones y exportaciones",
+      icon: Database,
+      color: "text-slate-600 bg-slate-50 dark:bg-slate-900/20",
+      periods: ["2024 (completo)", "2023", "Nov 2024", "Oct 2024"],
+      jurisdictions: ["Todas"],
+      analysts: ["Todos"],
+    },
   ];
+
+  const filteredReports = useMemo(() => {
+    return reports.filter((report) => {
+      const matchesPeriod =
+        periodFilter === "Todos" || report.periods.includes(periodFilter);
+
+      const matchesJurisdiction =
+        jurisdictionFilter === "Todas" ||
+        report.jurisdictions.includes("Todas") ||
+        report.jurisdictions.includes(jurisdictionFilter);
+
+      const matchesAnalyst =
+        analystFilter === "Todos" ||
+        report.analysts.includes("Todos") ||
+        report.analysts.includes(analystFilter);
+
+      return matchesPeriod && matchesJurisdiction && matchesAnalyst;
+    });
+  }, [periodFilter, jurisdictionFilter, analystFilter]);
+
   return (
     <div className="p-6">
       <SectionHeader
         title="Reportes y Exportaciones"
         sub="Generación de reportes con identidad institucional en PDF y Excel"
       />
+
       <div className="flex flex-wrap gap-3 mb-6 px-4 py-3 bg-card border border-border rounded-lg">
         <div className="flex flex-col gap-0.5">
-          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Período</label>
-          <select className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[160px]">
-            {["Nov 2024", "Oct 2024", "2024 (completo)", "2023", "Personalizado"].map(o => <option key={o}>{o}</option>)}
+          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+            Período
+          </label>
+          <select
+            value={periodFilter}
+            onChange={(e) => setPeriodFilter(e.target.value)}
+            className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[160px]"
+          >
+            {periodOptions.map((option) => (
+              <option key={option}>{option}</option>
+            ))}
           </select>
         </div>
+
         <div className="flex flex-col gap-0.5">
-          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Jurisdicción</label>
-          <select className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[160px]">
+          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+            Jurisdicción
+          </label>
+          <select
+            value={jurisdictionFilter}
+            onChange={(e) => setJurisdictionFilter(e.target.value)}
+            className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[160px]"
+          >
             <option>Todas</option>
-            {JURISDICCIONES.map(j => <option key={j}>{j}</option>)}
+            {JURISDICCIONES.map((j) => (
+              <option key={j}>{j}</option>
+            ))}
           </select>
         </div>
+
         <div className="flex flex-col gap-0.5">
-          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Analista</label>
-          <select className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[140px]">
-            <option>Todos</option>
-            {["Ana Rodríguez", "Luis Peña", "María Santos", "Pedro Álvarez"].map(a => <option key={a}>{a}</option>)}
+          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+            Analista
+          </label>
+          <select
+            value={analystFilter}
+            onChange={(e) => setAnalystFilter(e.target.value)}
+            className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[140px]"
+          >
+            {analystOptions.map((option) => (
+              <option key={option}>{option}</option>
+            ))}
           </select>
         </div>
       </div>
+
+      <div className="mb-4 text-xs text-muted-foreground">
+        {filteredReports.length} reporte(s) disponible(s) con los filtros seleccionados.
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {reports.map(r => (
-          <div key={r.name} className="bg-card border border-border rounded-lg p-4 hover:shadow-sm transition-shadow flex flex-col gap-3">
+        {filteredReports.map((r) => (
+          <div
+            key={r.name}
+            className="bg-card border border-border rounded-lg p-4 hover:shadow-sm transition-shadow flex flex-col gap-3"
+          >
             <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${r.color}`}>
               <r.icon size={17} />
             </div>
+
             <div>
               <p className="font-medium text-foreground text-sm">{r.name}</p>
               <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{r.desc}</p>
             </div>
+
             <div className="flex gap-2 mt-auto">
-              <Btn variant="secondary" size="sm" icon={Printer} onClick={triggerPrint}>PDF</Btn>
-              <Btn variant="secondary" size="sm" icon={FileSpreadsheet} onClick={() => downloadCSV(["Reporte"], [[r.name]], `${r.name.replace(/ /g,"-")}.csv`)}>Excel</Btn>
+              <Btn variant="secondary" size="sm" icon={Printer} onClick={triggerPrint}>
+                PDF
+              </Btn>
+              <Btn
+                variant="secondary"
+                size="sm"
+                icon={FileSpreadsheet}
+                onClick={() =>
+                  downloadCSV(
+                    ["Reporte", "Período", "Jurisdicción", "Analista"],
+                    [[r.name, periodFilter, jurisdictionFilter, analystFilter]],
+                    `${r.name.replace(/ /g, "-")}.csv`
+                  )
+                }
+              >
+                Excel
+              </Btn>
             </div>
           </div>
         ))}
+
+        {filteredReports.length === 0 && (
+          <div className="col-span-full bg-card border border-border rounded-lg p-6 text-sm text-muted-foreground text-center">
+            No hay reportes disponibles para la combinación de filtros seleccionada.
+          </div>
+        )}
       </div>
     </div>
   );
 }
+
 
 // ─── Settings View ────────────────────────────────────────────────────────────
 
