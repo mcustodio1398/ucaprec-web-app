@@ -1579,6 +1579,172 @@ function CaseDetailView({ setView, mode }: { setView: (v: View) => void; mode: "
 // ─── Analytics View ───────────────────────────────────────────────────────────
 
 function AnalyticsView() {
+  const periodOptions = [
+    "2024 (Año completo)",
+    "2023",
+    "2022",
+    "2021",
+    "Último trimestre",
+    "Último mes",
+  ];
+
+  const analystOptions = [
+    "Todos",
+    "Ana Rodríguez",
+    "Luis Peña",
+    "María Santos",
+    "Pedro Álvarez",
+  ];
+
+  const [periodFilter, setPeriodFilter] = useState("2024 (Año completo)");
+  const [jurisdictionFilter, setJurisdictionFilter] = useState("Todas");
+  const [caseTypeFilter, setCaseTypeFilter] = useState("Todos");
+  const [analystFilter, setAnalystFilter] = useState("Todos");
+
+  const analystRows = [
+    {
+      name: "Ana Rodríguez",
+      assigned: 47,
+      verified: 38,
+      reviewing: 9,
+      alerts: 14,
+      lastCase: "28/11/2024",
+    },
+    {
+      name: "Luis Peña",
+      assigned: 31,
+      verified: 27,
+      reviewing: 4,
+      alerts: 8,
+      lastCase: "27/11/2024",
+    },
+    {
+      name: "Pedro Álvarez",
+      assigned: 28,
+      verified: 22,
+      reviewing: 6,
+      alerts: 6,
+      lastCase: "24/11/2024",
+    },
+  ];
+
+  const analyticsData = useMemo(() => {
+    const periodFactorMap: Record<string, number> = {
+      "2024 (Año completo)": 1,
+      "2023": 0.86,
+      "2022": 0.72,
+      "2021": 0.6,
+      "Último trimestre": 0.78,
+      "Último mes": 0.52,
+    };
+
+    const typeFactorMap: Record<string, number> = {
+      Todos: 1,
+      Resolución: 0.94,
+      Sentencia: 1.08,
+      "Recurso de Casación": 0.82,
+    };
+
+    const jurisdictionFactor =
+      jurisdictionFilter === "Todas"
+        ? 1
+        : 0.72 + ((JURISDICCIONES.indexOf(jurisdictionFilter) % 5) * 0.07 || 0.07);
+
+    const analystFactor =
+      analystFilter === "Todos"
+        ? 1
+        : 0.8 + ((analystOptions.indexOf(analystFilter) % 4) * 0.06 || 0.06);
+
+    const periodFactor = periodFactorMap[periodFilter] ?? 1;
+    const typeFactor = typeFactorMap[caseTypeFilter] ?? 1;
+    const combinedFactor = periodFactor * jurisdictionFactor * analystFactor * typeFactor;
+
+    const visibleEvolutionBase =
+      periodFilter === "Último trimestre"
+        ? evolutionData.slice(-3)
+        : periodFilter === "Último mes"
+        ? evolutionData.slice(-1)
+        : evolutionData;
+
+    const filteredEvolutionData = visibleEvolutionBase.map((item) => ({
+      ...item,
+      casos: Math.max(1, Math.round(item.casos * combinedFactor)),
+    }));
+
+    const visibleAlertsBase =
+      periodFilter === "Último trimestre"
+        ? alertsByMonthData.slice(-3)
+        : periodFilter === "Último mes"
+        ? alertsByMonthData.slice(-1)
+        : alertsByMonthData;
+
+    const filteredAlertsByMonthData = visibleAlertsBase.map((item) => ({
+      ...item,
+      roja: Math.max(0, Math.round(item.roja * combinedFactor)),
+      migratoria: Math.max(0, Math.round(item.migratoria * combinedFactor)),
+      arresto: Math.max(0, Math.round(item.arresto * combinedFactor)),
+    }));
+
+    const filteredByTypeData = byTypeData.map((item) => {
+      const matchesSelectedType =
+        caseTypeFilter === "Todos" ||
+        item.name.toLowerCase().includes(caseTypeFilter.toLowerCase().split(" ")[0]);
+
+      return {
+        ...item,
+        value: Math.max(
+          1,
+          Math.round(item.value * combinedFactor * (matchesSelectedType ? 1 : 0.35))
+        ),
+      };
+    });
+
+    const filteredDistrictData =
+      jurisdictionFilter === "Todas"
+        ? districtData.map((item) => ({
+            ...item,
+            casos: Math.max(1, Math.round(item.casos * combinedFactor)),
+          }))
+        : districtData.map((item) => ({
+            ...item,
+            casos: Math.max(
+              1,
+              Math.round(
+                item.casos *
+                  combinedFactor *
+                  (item.name === jurisdictionFilter ? 1.15 : 0.4)
+              )
+            ),
+          }));
+
+    const filteredAnalystRows =
+      analystFilter === "Todos"
+        ? analystRows.map((row) => ({
+            ...row,
+            assigned: Math.max(1, Math.round(row.assigned * combinedFactor)),
+            verified: Math.max(0, Math.round(row.verified * combinedFactor)),
+            reviewing: Math.max(0, Math.round(row.reviewing * combinedFactor)),
+            alerts: Math.max(0, Math.round(row.alerts * combinedFactor)),
+          }))
+        : analystRows
+            .filter((row) => row.name === analystFilter)
+            .map((row) => ({
+              ...row,
+              assigned: Math.max(1, Math.round(row.assigned * combinedFactor)),
+              verified: Math.max(0, Math.round(row.verified * combinedFactor)),
+              reviewing: Math.max(0, Math.round(row.reviewing * combinedFactor)),
+              alerts: Math.max(0, Math.round(row.alerts * combinedFactor)),
+            }));
+
+    return {
+      filteredEvolutionData,
+      filteredAlertsByMonthData,
+      filteredByTypeData,
+      filteredDistrictData,
+      filteredAnalystRows,
+    };
+  }, [periodFilter, jurisdictionFilter, caseTypeFilter, analystFilter]);
+
   return (
     <div className="p-6">
       <SectionHeader
@@ -1586,43 +1752,100 @@ function AnalyticsView() {
         sub="Métricas avanzadas y tendencias del sistema UCAPREC"
         action={
           <div className="flex gap-2">
-            <Btn variant="secondary" icon={Printer} size="sm" onClick={triggerPrint}>Imprimir</Btn>
-            <Btn variant="secondary" icon={FileSpreadsheet} size="sm" onClick={() => downloadCSV(
-              ["Mes", "Casos"], evolutionData.map(d => [d.mes, d.casos]), "evolucion-casos.csv"
-            )}>Exportar Excel</Btn>
+            <Btn variant="secondary" icon={Printer} size="sm" onClick={triggerPrint}>
+              Imprimir
+            </Btn>
+            <Btn
+              variant="secondary"
+              icon={FileSpreadsheet}
+              size="sm"
+              onClick={() =>
+                downloadCSV(
+                  ["Mes", "Casos", "Período", "Jurisdicción", "Tipo de Expediente", "Analista"],
+                  analyticsData.filteredEvolutionData.map((d) => [
+                    d.mes,
+                    d.casos,
+                    periodFilter,
+                    jurisdictionFilter,
+                    caseTypeFilter,
+                    analystFilter,
+                  ]),
+                  "analitica-evolucion-filtrada.csv"
+                )
+              }
+            >
+              Exportar Excel
+            </Btn>
           </div>
         }
       />
 
-      {/* Filter strip with real catalogs */}
       <div className="flex flex-wrap gap-3 mb-6 px-4 py-3 bg-card border border-border rounded-lg">
         <div className="flex flex-col gap-0.5">
-          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Período</label>
-          <select className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[160px]">
-            {["2024 (Año completo)", "2023", "2022", "2021", "Último trimestre", "Último mes"].map(o => <option key={o}>{o}</option>)}
+          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+            Período
+          </label>
+          <select
+            value={periodFilter}
+            onChange={(e) => setPeriodFilter(e.target.value)}
+            className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[160px]"
+          >
+            {periodOptions.map((o) => (
+              <option key={o}>{o}</option>
+            ))}
           </select>
         </div>
+
         <div className="flex flex-col gap-0.5">
-          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Jurisdicción</label>
-          <select className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[160px]">
+          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+            Jurisdicción
+          </label>
+          <select
+            value={jurisdictionFilter}
+            onChange={(e) => setJurisdictionFilter(e.target.value)}
+            className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[160px]"
+          >
             <option>Todas</option>
-            {JURISDICCIONES.map(j => <option key={j}>{j}</option>)}
+            {JURISDICCIONES.map((j) => (
+              <option key={j}>{j}</option>
+            ))}
           </select>
         </div>
+
         <div className="flex flex-col gap-0.5">
-          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Tipo de Expediente</label>
-          <select className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[160px]">
+          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+            Tipo de Expediente
+          </label>
+          <select
+            value={caseTypeFilter}
+            onChange={(e) => setCaseTypeFilter(e.target.value)}
+            className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[160px]"
+          >
             <option>Todos</option>
-            {TIPOS_EXPEDIENTE.map(t => <option key={t}>{t}</option>)}
+            {TIPOS_EXPEDIENTE.map((t) => (
+              <option key={t}>{t}</option>
+            ))}
           </select>
         </div>
+
         <div className="flex flex-col gap-0.5">
-          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Analista</label>
-          <select className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[140px]">
-            <option>Todos</option>
-            {["Ana Rodríguez", "Luis Peña", "María Santos", "Pedro Álvarez"].map(a => <option key={a}>{a}</option>)}
+          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+            Analista
+          </label>
+          <select
+            value={analystFilter}
+            onChange={(e) => setAnalystFilter(e.target.value)}
+            className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[140px]"
+          >
+            {analystOptions.map((a) => (
+              <option key={a}>{a}</option>
+            ))}
           </select>
         </div>
+      </div>
+
+      <div className="mb-4 text-xs text-muted-foreground">
+        Analítica actualizada según los filtros seleccionados.
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1630,7 +1853,10 @@ function AnalyticsView() {
           <h3 className="font-semibold text-foreground text-sm mb-1">Evolución Anual de Casos</h3>
           <p className="text-xs text-muted-foreground mb-4">Nuevos expedientes registrados por mes</p>
           <ResponsiveContainer width="100%" height={220}>
-            <AreaChart data={evolutionData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+            <AreaChart
+              data={analyticsData.filteredEvolutionData}
+              margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
+            >
               <defs>
                 <linearGradient id="gradA" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#1D4ED8" stopOpacity={0.25} />
@@ -1638,10 +1864,33 @@ function AnalyticsView() {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="mes" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }} />
-              <Area type="monotone" dataKey="casos" stroke="#1D4ED8" strokeWidth={2} fill="url(#gradA)" dot={{ r: 3, fill: "#1D4ED8" }} />
+              <XAxis
+                dataKey="mes"
+                tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: "var(--card)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  fontSize: 11,
+                }}
+              />
+              <Area
+                type="monotone"
+                dataKey="casos"
+                stroke="#1D4ED8"
+                strokeWidth={2}
+                fill="url(#gradA)"
+                dot={{ r: 3, fill: "#1D4ED8" }}
+              />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -1650,48 +1899,115 @@ function AnalyticsView() {
           <h3 className="font-semibold text-foreground text-sm mb-1">Alertas por Tipo — Mensual</h3>
           <p className="text-xs text-muted-foreground mb-4">Últimos 6 meses</p>
           <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={alertsByMonthData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+            <BarChart
+              data={analyticsData.filteredAlertsByMonthData}
+              margin={{ top: 0, right: 0, left: -20, bottom: 0 }}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="mes" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }} />
+              <XAxis
+                dataKey="mes"
+                tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: "var(--card)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  fontSize: 11,
+                }}
+              />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Bar key="ana-roja" dataKey="roja" name="Alerta Roja" fill="#B91C1C" radius={[2, 2, 0, 0]}>
-                <LabelList dataKey="roja" position="top" style={{ fontSize: 9, fill: "var(--muted-foreground)", fontFamily: "monospace" }} />
+              <Bar dataKey="roja" name="Alerta Roja" fill="#B91C1C" radius={[2, 2, 0, 0]}>
+                <LabelList
+                  dataKey="roja"
+                  position="top"
+                  style={{
+                    fontSize: 9,
+                    fill: "var(--muted-foreground)",
+                    fontFamily: "monospace",
+                  }}
+                />
               </Bar>
-              <Bar key="ana-migratoria" dataKey="migratoria" name="Migratoria" fill="#4F46E5" radius={[2, 2, 0, 0]}>
-                <LabelList dataKey="migratoria" position="top" style={{ fontSize: 9, fill: "var(--muted-foreground)", fontFamily: "monospace" }} />
+              <Bar dataKey="migratoria" name="Migratoria" fill="#4F46E5" radius={[2, 2, 0, 0]}>
+                <LabelList
+                  dataKey="migratoria"
+                  position="top"
+                  style={{
+                    fontSize: 9,
+                    fill: "var(--muted-foreground)",
+                    fontFamily: "monospace",
+                  }}
+                />
               </Bar>
-              <Bar key="ana-arresto" dataKey="arresto" name="Arresto" fill="#D97706" radius={[2, 2, 0, 0]}>
-                <LabelList dataKey="arresto" position="top" style={{ fontSize: 9, fill: "var(--muted-foreground)", fontFamily: "monospace" }} />
+              <Bar dataKey="arresto" name="Arresto" fill="#D97706" radius={[2, 2, 0, 0]}>
+                <LabelList
+                  dataKey="arresto"
+                  position="top"
+                  style={{
+                    fontSize: 9,
+                    fill: "var(--muted-foreground)",
+                    fontFamily: "monospace",
+                  }}
+                />
               </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
 
         <div className="bg-card border border-border rounded-lg p-5">
-          <h3 className="font-semibold text-foreground text-sm mb-1">Distribución por Tipo de Expediente</h3>
+          <h3 className="font-semibold text-foreground text-sm mb-1">
+            Distribución por Tipo de Expediente
+          </h3>
           <p className="text-xs text-muted-foreground mb-4">Total de registros</p>
           <ResponsiveContainer width="100%" height={160}>
             <PieChart>
-              <Pie data={byTypeData} cx="50%" cy="50%" outerRadius={65} dataKey="value">
-                {byTypeData.map((entry) => <Cell key={`type-${entry.name}`} fill={entry.fill} />)}
+              <Pie
+                data={analyticsData.filteredByTypeData}
+                cx="50%"
+                cy="50%"
+                outerRadius={65}
+                dataKey="value"
+              >
+                {analyticsData.filteredByTypeData.map((entry) => (
+                  <Cell key={`type-${entry.name}`} fill={entry.fill} />
+                ))}
               </Pie>
-              <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }} />
+              <Tooltip
+                contentStyle={{
+                  background: "var(--card)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  fontSize: 11,
+                }}
+              />
             </PieChart>
           </ResponsiveContainer>
           <div className="space-y-2 mt-2">
-            {byTypeData.map((item, i) => {
-              const total = byTypeData.reduce((s, d) => s + d.value, 0);
+            {analyticsData.filteredByTypeData.map((item, i) => {
+              const total = analyticsData.filteredByTypeData.reduce((s, d) => s + d.value, 0);
               return (
                 <div key={i} className="flex items-center justify-between text-xs">
                   <div className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: item.fill }} />
+                    <div
+                      className="w-2.5 h-2.5 rounded-sm flex-shrink-0"
+                      style={{ background: item.fill }}
+                    />
                     <span className="text-muted-foreground">{item.name}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="font-mono font-medium text-foreground">{item.value.toLocaleString()}</span>
-                    <span className="text-muted-foreground/60 font-mono">({Math.round(item.value / total * 100)}%)</span>
+                    <span className="font-mono font-medium text-foreground">
+                      {item.value.toLocaleString()}
+                    </span>
+                    <span className="text-muted-foreground/60 font-mono">
+                      ({total > 0 ? Math.round((item.value / total) * 100) : 0}%)
+                    </span>
                   </div>
                 </div>
               );
@@ -1703,31 +2019,71 @@ function AnalyticsView() {
           <h3 className="font-semibold text-foreground text-sm mb-1">Casos por Jurisdicción</h3>
           <p className="text-xs text-muted-foreground mb-4">Distribución geográfica</p>
           <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={districtData} layout="vertical" margin={{ left: 10, right: 20, top: 0, bottom: 0 }}>
+            <BarChart
+              data={analyticsData.filteredDistrictData}
+              layout="vertical"
+              margin={{ left: 10, right: 20, top: 0, bottom: 0 }}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 10, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 10, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }} />
-              <Bar key="ana-casos" dataKey="casos" fill="#059669" radius={[0, 3, 3, 0]} barSize={12}>
-                <LabelList dataKey="casos" position="right" style={{ fontSize: 10, fill: "var(--muted-foreground)", fontFamily: "monospace" }} />
+              <XAxis
+                type="number"
+                tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                type="category"
+                dataKey="name"
+                width={90}
+                tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: "var(--card)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  fontSize: 11,
+                }}
+              />
+              <Bar dataKey="casos" fill="#059669" radius={[0, 3, 3, 0]} barSize={12}>
+                <LabelList
+                  dataKey="casos"
+                  position="right"
+                  style={{
+                    fontSize: 10,
+                    fill: "var(--muted-foreground)",
+                    fontFamily: "monospace",
+                  }}
+                />
               </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
       </div>
 
-      {/* Ranking analistas */}
       <div className="mt-6 bg-card border border-border rounded-lg overflow-hidden">
         <div className="px-5 py-4 border-b border-border">
           <h3 className="font-semibold text-foreground text-sm">Rendimiento por Analista</h3>
         </div>
         <Table
-          headers={["Analista", "Casos Asignados", "Verificados", "En Revisión", "Alertas Activas", "Último Caso"]}
-          rows={[
-            ["Ana Rodríguez", <span className="font-mono">47</span>, <span className="font-mono text-emerald-600">38</span>, <span className="font-mono text-amber-600">9</span>, <span className="font-mono text-red-600">14</span>, "28/11/2024"],
-            ["Luis Peña", <span className="font-mono">31</span>, <span className="font-mono text-emerald-600">27</span>, <span className="font-mono text-amber-600">4</span>, <span className="font-mono text-red-600">8</span>, "27/11/2024"],
-            ["Pedro Álvarez", <span className="font-mono">28</span>, <span className="font-mono text-emerald-600">22</span>, <span className="font-mono text-amber-600">6</span>, <span className="font-mono text-red-600">6</span>, "24/11/2024"],
+          headers={[
+            "Analista",
+            "Casos Asignados",
+            "Verificados",
+            "En Revisión",
+            "Alertas Activas",
+            "Último Caso",
           ]}
+          rows={analyticsData.filteredAnalystRows.map((row) => [
+            row.name,
+            <span className="font-mono">{row.assigned}</span>,
+            <span className="font-mono text-emerald-600">{row.verified}</span>,
+            <span className="font-mono text-amber-600">{row.reviewing}</span>,
+            <span className="font-mono text-red-600">{row.alerts}</span>,
+            row.lastCase,
+          ])}
         />
       </div>
     </div>
