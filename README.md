@@ -9,3 +9,4 @@
 
   Run `npm run dev` to start the development server.
   
+  Prueba de flujo Git para la rama feature/filtros-reportes.

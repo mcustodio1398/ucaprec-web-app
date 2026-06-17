@@ -25,9 +25,9 @@ import mpLogo from "../imports/Logo_-_Ministerio_Publico_-_Horizontal.png";
 // ─── Types ─────────────────────────────────────────────────────────────────
 
 type View =
-  | "dashboard" | "cases" | "case-detail" | "case-form"
+  | "dashboard" | "cases" | "case-detail" | "case-form" | "case-new"
   | "defendants" | "victims" | "measures" | "documents"
-  | "reports" | "analytics" | "users" | "audit" | "catalogs" | "settings";
+  | "reports" | "analytics" | "notifications" | "users" | "audit" | "catalogs" | "settings";
 
 interface NavItem { id: View; label: string; icon: any; badge?: number }
 interface NavGroup { label: string; items: NavItem[] }
@@ -134,11 +134,11 @@ const auditData = [
 ];
 
 const systemAlerts = [
-  { type: "danger", msg: "Alerta roja activada — EXP-2024-1847: Carlos Méndez Ríos (Lavado de Activos)", time: "hace 2h" },
-  { type: "warning", msg: "Alerta migratoria actualizada — EXP-2024-1846: INVERSALUD S.A.", time: "hace 5h" },
-  { type: "info", msg: "EXP-2024-1839 asignado a Ana Rodríguez por supervisor", time: "hace 8h" },
-  { type: "success", msg: "Documento Sentencia_0881.pdf subido correctamente en EXP-2024-1844", time: "hace 10h" },
-  { type: "warning", msg: "EXP-2024-1821 pendiente de verificación — 14 días sin actualizar", time: "hace 1d" },
+  { id: 1, type: "danger", msg: "Alerta roja activada — EXP-2024-1847: Carlos Méndez Ríos (Lavado de Activos)", time: "hace 2h", exp: "EXP-2024-1847", action: "open-case" },
+  { id: 2, type: "warning", msg: "Alerta migratoria actualizada — EXP-2024-1846: INVERSALUD S.A.", time: "hace 5h", exp: "EXP-2024-1846", action: "open-case" },
+  { id: 3, type: "info", msg: "EXP-2024-1839 asignado a Ana Rodríguez por supervisor", time: "hace 8h", exp: "EXP-2024-1839", action: "open-case" },
+  { id: 4, type: "success", msg: "Documento Sentencia_0881.pdf subido correctamente en EXP-2024-1844", time: "hace 10h", exp: "EXP-2024-1844", action: "open-case" },
+  { id: 5, type: "warning", msg: "EXP-2024-1821 pendiente de verificación — 14 días sin actualizar", time: "hace 1d", exp: "EXP-2024-1821", action: "open-case" },
 ];
 
 // ─── Export / Print utilities ────────────────────────────────────────────────
@@ -156,6 +156,12 @@ function downloadCSV(headers: string[], rows: (string | number)[][], filename: s
 }
 
 function triggerPrint() { window.print(); }
+function hasUnsavedDefData(def: Omit<DefEntry, "id">) {
+  return Object.entries(def).some(([key, value]) => {
+    if (["subidoPN", "arresto", "alertaRoja", "alertaMig"].includes(key)) return Boolean(value);
+    return String(value ?? "").trim() !== "";
+  });
+}
 
 // ─── Shared defendant / victim types ─────────────────────────────────────────
 
@@ -170,9 +176,9 @@ interface DefEntry {
 interface VicEntry { id: number; tipo: string; nombre: string; }
 
 const EMPTY_DEF: Omit<DefEntry, "id"> = {
-  tipo: "Persona Física", nombre: "", doc: "", edad: "", sexo: "Hombre",
-  nac: "Dominicano/a", estadoImp: "Prófugo", estadoJud: "Condenado",
-  centro: "N/A (Prófugo)", penaImp: "", penaPriv: "", penaSusp: "",
+  tipo: "", nombre: "", doc: "", edad: "", sexo: "",
+  nac: "", estadoImp: "", estadoJud: "",
+  centro: "", penaImp: "", penaPriv: "", penaSusp: "",
   indemnizacion: "", garantia: "", multa: "", decomiso: "",
   subidoPN: false, arresto: false, alertaRoja: false, alertaMig: false,
 };
@@ -200,16 +206,14 @@ const NAV: NavGroup[] = [
       { id: "reports", label: "Reportes", icon: BarChart2 },
       { id: "analytics", label: "Analítica", icon: Activity },
     ]
-  },
-  {
-    label: "Administración",
-    items: [
-      { id: "users", label: "Usuarios y Roles", icon: Shield },
-      { id: "audit", label: "Auditoría", icon: Database },
-      { id: "catalogs", label: "Catálogos", icon: BookOpen },
-      { id: "settings", label: "Configuración", icon: Settings },
-    ]
   }
+];
+
+const ADMIN_MENU: { id: View; label: string; icon: any }[] = [
+  { id: "users", label: "Usuarios y Roles", icon: Shield },
+  { id: "audit", label: "Auditoría", icon: Database },
+  { id: "catalogs", label: "Catálogos", icon: BookOpen },
+  { id: "settings", label: "Configuración", icon: Settings },
 ];
 
 // ─── Reusable UI ─────────────────────────────────────────────────────────────
@@ -265,8 +269,23 @@ function SectionHeader({ title, sub, action }: { title: string; sub?: string; ac
   return (
     <div className="flex items-start justify-between mb-6">
       <div className="flex-1 min-w-0 pr-4">
-        <h1 className="text-2xl font-bold text-foreground leading-tight" style={{ fontFamily: "'Crimson Pro', serif" }}>{title}</h1>
-        {sub && <p className="text-sm text-muted-foreground mt-1">{sub}</p>}
+        {/* Module title badge — blue diffused container */}
+        <div
+          className="inline-flex items-center px-4 py-2 rounded-lg mb-1"
+          style={{
+            background: "linear-gradient(135deg, rgba(29,78,216,0.10) 0%, rgba(59,130,246,0.07) 100%)",
+            border: "1px solid rgba(29,78,216,0.18)",
+            boxShadow: "0 1px 8px 0 rgba(29,78,216,0.07)",
+          }}
+        >
+          <h1
+            className="text-xl font-bold leading-tight"
+            style={{ fontFamily: "'Crimson Pro', serif", color: "var(--color-foreground)" }}
+          >
+            {title}
+          </h1>
+        </div>
+        {sub && <p className="text-sm text-muted-foreground mt-1 pl-1">{sub}</p>}
       </div>
       {action && <div className="flex-shrink-0">{action}</div>}
     </div>
@@ -290,6 +309,57 @@ function Btn({ children, variant = "primary", size = "md", onClick, icon: Icon }
       {Icon && <Icon size={14} />}
       {children}
     </button>
+  );
+}
+
+function ActionDialog({
+  open,
+  title,
+  message,
+  variant = "info",
+  confirmLabel = "Aceptar",
+  cancelLabel,
+  onConfirm,
+  onCancel,
+  icon: Icon,
+}: {
+  open: boolean;
+  title: string;
+  message: string;
+  variant?: "info" | "danger";
+  confirmLabel?: string;
+  cancelLabel?: string;
+  onConfirm: () => void;
+  onCancel?: () => void;
+  icon?: any;
+}) {
+  if (!open) return null;
+
+  const iconCls = variant === "danger"
+    ? "bg-red-100 dark:bg-red-900/30 text-red-600"
+    : "bg-amber-100 dark:bg-amber-900/30 text-amber-600";
+  const ActionIcon = Icon ?? (variant === "danger" ? AlertTriangle : Info);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+      <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md p-6">
+        <div className="flex items-start gap-4 mb-4">
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 ${iconCls}`}>
+            <ActionIcon size={20} />
+          </div>
+          <div className="min-w-0">
+            <h3 className="font-semibold text-foreground text-lg leading-tight">{title}</h3>
+            <p className="text-sm text-muted-foreground mt-1 leading-relaxed whitespace-pre-line">{message}</p>
+          </div>
+        </div>
+        <div className="flex gap-2 justify-end pt-2">
+          {cancelLabel && onCancel && (
+            <Btn variant="secondary" onClick={onCancel}>{cancelLabel}</Btn>
+          )}
+          <Btn variant={variant === "danger" ? "danger" : "primary"} onClick={onConfirm}>{confirmLabel}</Btn>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -361,29 +431,27 @@ function Sidebar({ view, setView, navigateModule, collapsed, setCollapsed }: {
   collapsed: boolean; setCollapsed: (b: boolean) => void;
 }) {
   return (
-    <aside className={`flex flex-col h-screen bg-sidebar border-r border-sidebar-border transition-all duration-200 ${collapsed ? "w-[60px]" : "w-[220px]"} flex-shrink-0`}>
+    <aside className={`flex flex-col h-screen bg-sidebar border-r border-sidebar-border transition-all duration-200 ${collapsed ? "w-[60px]" : "w-[220px]"} flex-shrink-0 overflow-hidden`}>
       {/* Logo */}
-      <div className={`flex items-center border-b border-sidebar-border ${collapsed ? "justify-center px-3 py-3" : "px-4 py-3"}`}>
+      <div className={`flex items-center border-b border-sidebar-border ${collapsed ? "justify-center px-2 py-2" : "px-2 py-1.5"}`}>
         {collapsed ? (
           <div className="w-8 h-8 rounded bg-white/10 flex items-center justify-center flex-shrink-0">
             <Scale size={15} className="text-white" />
           </div>
         ) : (
-          //Nombre de UCAPREC debajo del logo, con tracking amplio y color azul claro
-          <div className="flex flex-col gap-1.5 min-w-0">
-            <img src={mpLogo} alt="Ministerio Público" className="h-25 w-auto object-contain object-left" />
-            <div className="text-[12
-            px] text-blue-300/60 tracking-[0.2em] uppercase font-semibold pl-0.5">UCAPREC</div>
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <img src={mpLogo} alt="Ministerio Público" className="h-25 w-auto object-contain object-left -mb-1" />
+            <div className="text-[11px] text-blue-300/60 tracking-[0.16em] uppercase font-semibold pl-0.5 -mt-1">UCAPREC</div>
           </div>
         )}
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-4">
+      <nav className="flex-1 overflow-hidden py-1.5 px-2 space-y-2">
         {NAV.map(group => (
           <div key={group.label}>
             {!collapsed && (
-              <div className="text-[9px] font-bold uppercase tracking-widest text-sidebar-foreground/40 px-2 mb-1">{group.label}</div>
+              <div className="text-[8px] font-bold uppercase tracking-[0.18em] text-sidebar-foreground/40 px-2 mb-0.5">{group.label}</div>
             )}
             <div className="space-y-0.5">
               {group.items.map(item => {
@@ -393,13 +461,11 @@ function Sidebar({ view, setView, navigateModule, collapsed, setCollapsed }: {
                     key={item.id}
                     onClick={() => navigateModule(item.id)}
                     title={collapsed ? item.label : undefined}
-                    className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-md text-sm transition-colors relative group
-                      ${active
-                        ? "bg-white/10 text-white"
-                        : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-white"
-                      } ${collapsed ? "justify-center" : ""}`}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[13px] transition-colors relative group
+                      ${active ? "bg-white/10 text-white" : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-white"}
+                      ${collapsed ? "justify-center" : ""}`}
                   >
-                    <item.icon size={16} className="flex-shrink-0" />
+                    <item.icon size={15} className="flex-shrink-0" />
                     {!collapsed && <span className="flex-1 text-left truncate">{item.label}</span>}
                     {!collapsed && item.badge && (
                       <span className="text-[10px] font-mono bg-red-600 text-white rounded px-1.5 py-0.5 leading-none">{item.badge}</span>
@@ -416,22 +482,22 @@ function Sidebar({ view, setView, navigateModule, collapsed, setCollapsed }: {
       </nav>
 
       {/* User & toggle */}
-      <div className="border-t border-sidebar-border p-3 space-y-1">
+      <div className="border-t border-sidebar-border p-2 space-y-0.5">
         <button
           onClick={() => setCollapsed(!collapsed)}
-          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sidebar-foreground/50 hover:text-white hover:bg-sidebar-accent transition-colors text-xs"
+          className="w-full flex items-center gap-2 px-2 py-1 rounded-md text-sidebar-foreground/50 hover:text-white hover:bg-sidebar-accent transition-colors text-[11px]"
         >
-          <Menu size={14} />
+          <Menu size={13} />
           {!collapsed && <span>Colapsar menú</span>}
         </button>
         {!collapsed && (
-          <div className="flex items-center gap-2 px-2 py-2 rounded-md">
-            <div className="w-7 h-7 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">RH</div>
+          <div className="flex items-center gap-2 px-2 py-1.5 rounded-md">
+            <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0">RH</div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-white truncate">Roberto Herrera</div>
-              <div className="text-[10px] text-sidebar-foreground/50">Administrador</div>
+              <div className="text-[12px] font-medium text-white truncate">Roberto Herrera</div>
+              <div className="text-[9px] text-sidebar-foreground/50">Administrador</div>
             </div>
-            <LogOut size={13} className="text-sidebar-foreground/40 hover:text-white cursor-pointer flex-shrink-0" />
+            <LogOut size={12} className="text-sidebar-foreground/40 hover:text-white cursor-pointer flex-shrink-0" />
           </div>
         )}
       </div>
@@ -441,11 +507,24 @@ function Sidebar({ view, setView, navigateModule, collapsed, setCollapsed }: {
 
 // ─── TopBar ───────────────────────────────────────────────────────────────────
 
-function TopBar({ title, dark, setDark, setView, goBack, canGoBack, breadcrumb }: {
+function TopBar({
+  title,
+  dark,
+  setDark,
+  setView,
+  navigateModule,
+  goBack,
+  canGoBack,
+  breadcrumb,
+  openCaseFromNotification,
+  openNotificationsCenter,
+}: {
   title: string; dark: boolean; setDark: (b: boolean) => void; setView: (v: View) => void;
-  goBack: () => void; canGoBack: boolean; breadcrumb: View[];
+  navigateModule: (v: View) => void; goBack: () => void; canGoBack: boolean; breadcrumb: View[];
+  openCaseFromNotification: (caseId: string) => void; openNotificationsCenter: () => void;
 }) {
   const [notifOpen, setNotifOpen] = useState(false);
+  const [adminMenuOpen, setAdminMenuOpen] = useState(false);
 
   return (
     <header className="h-14 flex items-center justify-between px-4 border-b border-blue-900/30 bg-[#1a3a6e] sticky top-0 z-10 shadow-md">
@@ -479,7 +558,7 @@ function TopBar({ title, dark, setDark, setView, goBack, canGoBack, breadcrumb }
         </div>
       </div>
 
-      {/* Right: search, notifications, dark mode */}
+      {/* Right: search, notifications, dark mode, admin menu */}
       <div className="flex items-center gap-2 flex-shrink-0">
         <div className="relative hidden sm:block">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-300/60" />
@@ -492,7 +571,10 @@ function TopBar({ title, dark, setDark, setView, goBack, canGoBack, breadcrumb }
         {/* Notifications */}
         <div className="relative">
           <button
-            onClick={() => setNotifOpen(!notifOpen)}
+            onClick={() => {
+              setNotifOpen(!notifOpen);
+              if (adminMenuOpen) setAdminMenuOpen(false);
+            }}
             className="relative w-8 h-8 flex items-center justify-center rounded-md text-blue-200 hover:text-white hover:bg-white/10 transition-colors"
           >
             <Bell size={16} />
@@ -505,37 +587,191 @@ function TopBar({ title, dark, setDark, setView, goBack, canGoBack, breadcrumb }
                 <button onClick={() => setNotifOpen(false)}><X size={14} className="text-muted-foreground" /></button>
               </div>
               <div className="divide-y divide-border max-h-72 overflow-y-auto">
-                {systemAlerts.map((a, i) => {
+                {systemAlerts.map((a) => {
                   const colors = { danger: "text-red-600", warning: "text-amber-600", info: "text-blue-600", success: "text-emerald-600" };
                   const icons = { danger: AlertOctagon, warning: AlertTriangle, info: Info, success: CheckCircle };
                   const Icon = icons[a.type as keyof typeof icons];
                   return (
-                    <div key={i} className="flex gap-3 px-4 py-3 hover:bg-muted/40 cursor-pointer">
+                    <button
+                      key={a.id}
+                      onClick={() => {
+                        setNotifOpen(false);
+                        if (a.exp) {
+                          openCaseFromNotification(a.exp);
+                          return;
+                        }
+                        openNotificationsCenter();
+                      }}
+                      className="w-full flex gap-3 px-4 py-3 hover:bg-muted/40 transition-colors text-left"
+                    >
                       <Icon size={14} className={`mt-0.5 flex-shrink-0 ${colors[a.type as keyof typeof colors]}`} />
                       <div>
                         <p className="text-xs text-foreground leading-snug">{a.msg}</p>
                         <p className="text-[10px] text-muted-foreground mt-1 font-mono">{a.time}</p>
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
               <div className="px-4 py-2 border-t border-border">
-                <button className="text-xs text-primary hover:underline w-full text-center">Ver todas las notificaciones</button>
+                <button
+                  onClick={() => {
+                    setNotifOpen(false);
+                    openNotificationsCenter();
+                  }}
+                  className="text-xs text-primary hover:underline w-full text-center"
+                >
+                  Ver todas las notificaciones
+                </button>
               </div>
             </div>
           )}
         </div>
 
-        {/* Dark mode */}
+        {/* Dark mode - middle */}
         <button
           onClick={() => setDark(!dark)}
           className="w-8 h-8 flex items-center justify-center rounded-md text-blue-200 hover:text-white hover:bg-white/10 transition-colors"
+          title={dark ? "Modo claro" : "Modo oscuro"}
         >
           {dark ? <Sun size={16} /> : <Moon size={16} />}
         </button>
+
+        {/* Admin menu - right */}
+        <div className="relative">
+          <button
+            onClick={() => {
+              setAdminMenuOpen(!adminMenuOpen);
+              if (notifOpen) setNotifOpen(false);
+            }}
+            className="w-8 h-8 flex items-center justify-center rounded-md text-blue-200 hover:text-white hover:bg-white/10 transition-colors"
+            title="Menú de administración"
+          >
+            <Menu size={16} />
+          </button>
+          {adminMenuOpen && (
+            <div className="absolute right-0 top-11 w-56 bg-card border border-border rounded-lg shadow-xl z-50 overflow-hidden">
+              <div className="px-4 py-3 border-b border-border bg-muted/20">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Administración</span>
+              </div>
+              <div className="py-1.5">
+                {ADMIN_MENU.map(item => {
+                  const active = breadcrumb[breadcrumb.length - 1] === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        setAdminMenuOpen(false);
+                        navigateModule(item.id);
+                      }}
+                      className={`w-full flex items-center gap-2 px-4 py-2 text-sm transition-colors ${active ? "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300" : "text-foreground hover:bg-muted/60"}`}
+                    >
+                      <item.icon size={15} className="flex-shrink-0" />
+                      <span className="truncate">{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </header>
+  );
+}
+
+// ─── Notifications View ──────────────────────────────────────────────────────
+function NotificationsView({ openCaseFromNotification }: { openCaseFromNotification: (caseId: string) => void }) {
+  const [filterType, setFilterType] = useState("Todas");
+
+  const filtered = systemAlerts.filter(a => filterType === "Todas" || a.type === filterType);
+
+  const colors = {
+    danger: "text-red-600",
+    warning: "text-amber-600",
+    info: "text-blue-600",
+    success: "text-emerald-600",
+  };
+  const badges = {
+    danger: "bg-red-100 text-red-800 dark:bg-red-900/25 dark:text-red-400",
+    warning: "bg-amber-100 text-amber-800 dark:bg-amber-900/25 dark:text-amber-400",
+    info: "bg-blue-100 text-blue-800 dark:bg-blue-900/25 dark:text-blue-400",
+    success: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/25 dark:text-emerald-400",
+  };
+  const icons = {
+    danger: AlertOctagon,
+    warning: AlertTriangle,
+    info: Info,
+    success: CheckCircle,
+  };
+  const labels = {
+    danger: "Crítica",
+    warning: "Atención",
+    info: "Informativa",
+    success: "Completada",
+  };
+
+  return (
+    <div className="p-6">
+      <SectionHeader
+        title="Centro de Notificaciones"
+        sub="Historial de alertas operativas y acceso rápido para editar expedientes relacionados"
+      />
+
+      <div className="bg-card border border-border rounded-lg p-4 mb-4 flex flex-wrap gap-2 items-center">
+        {[
+          ["Todas", "Todas"],
+          ["danger", "Críticas"],
+          ["warning", "Atención"],
+          ["info", "Informativas"],
+          ["success", "Completadas"],
+        ].map(([value, label]) => (
+          <button
+            key={value}
+            onClick={() => setFilterType(value)}
+            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${filterType === value ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+          >
+            {label}
+          </button>
+        ))}
+        <span className="ml-auto text-xs text-muted-foreground font-mono">{filtered.length} notificación(es)</span>
+      </div>
+
+      <div className="bg-card border border-border rounded-lg overflow-hidden">
+        {filtered.length === 0 ? (
+          <div className="py-12 flex flex-col items-center gap-3 text-muted-foreground">
+            <Bell size={30} className="opacity-30" />
+            <p className="text-sm">No hay notificaciones para el filtro seleccionado.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {filtered.map(alert => {
+              const Icon = icons[alert.type as keyof typeof icons];
+              return (
+                <button
+                  key={alert.id}
+                  onClick={() => alert.exp && openCaseFromNotification(alert.exp)}
+                  className="w-full flex items-start gap-4 px-5 py-4 hover:bg-muted/30 transition-colors text-left"
+                >
+                  <Icon size={18} className={`mt-0.5 flex-shrink-0 ${colors[alert.type as keyof typeof colors]}`} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${badges[alert.type as keyof typeof badges]}`}>
+                        {labels[alert.type as keyof typeof labels]}
+                      </span>
+                      {alert.exp && <span className="text-[11px] font-mono text-primary">{alert.exp}</span>}
+                      <span className="text-[11px] text-muted-foreground font-mono ml-auto">{alert.time}</span>
+                    </div>
+                    <p className="text-sm text-foreground leading-relaxed">{alert.msg}</p>
+                    {alert.exp && <p className="text-xs text-primary mt-2">Abrir expediente para edición</p>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -623,6 +859,7 @@ function exportDashboardPDF() {
 }
 
 function DashboardView({ setView }: { setView: (v: View) => void }) {
+  const totalImputados = defendants.length;
   return (
     <div className="p-6 space-y-6">
       <SectionHeader
@@ -637,9 +874,11 @@ function DashboardView({ setView }: { setView: (v: View) => void }) {
       />
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <KPICard label="Expedientes Totales" value={KPI.total} delta="+47 este mes"
           icon={FolderOpen} bg="bg-blue-50 dark:bg-blue-900/20" fg="text-blue-700 dark:text-blue-400" sub="Desde 1990 a la fecha" />
+        <KPICard label="Imputados Totales" value={totalImputados}
+          icon={Users} bg="bg-sky-50 dark:bg-sky-900/20" fg="text-sky-700 dark:text-sky-400" sub="Registros cargados actualmente" />
         <KPICard label="Prófugos Activos" value={KPI.profugos} delta="+8 este mes"
           icon={UserX} bg="bg-red-50 dark:bg-red-900/20" fg="text-red-700 dark:text-red-400" />
         <KPICard label="En Rebeldía" value={KPI.rebeldes} delta="-3 este mes"
@@ -825,6 +1064,7 @@ function DashboardView({ setView }: { setView: (v: View) => void }) {
 
 function CasesView({ setView }: { setView: (v: View) => void }) {
   const [search, setSearch] = useState("");
+  const [filterRecordStatus, setFilterRecordStatus] = useState("Todos");
   const [filterStatus, setFilterStatus] = useState("Todos");
   const [filterTipo, setFilterTipo] = useState("Todos");
   const [filterDelito, setFilterDelito] = useState("Todos");
@@ -837,6 +1077,8 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return cases.filter(c => {
+      if (filterRecordStatus === "Requieren atención" && c.estReg !== "En Revisión") return false;
+      if (filterRecordStatus !== "Todos" && filterRecordStatus !== "Requieren atención" && c.estReg !== filterRecordStatus) return false;
       if (filterStatus !== "Todos" && c.estatus !== filterStatus) return false;
       if (filterTipo !== "Todos" && c.tipo !== filterTipo) return false;
       if (filterDelito !== "Todos" && c.delito !== filterDelito) return false;
@@ -853,11 +1095,29 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
           !c.delito.toLowerCase().includes(q) && !c.sentencia.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [cases, search, filterStatus, filterTipo, filterDelito, filterAnalista, filterDesde, filterHasta]);
+  }, [cases, search, filterRecordStatus, filterStatus, filterTipo, filterDelito, filterAnalista, filterDesde, filterHasta]);
+
+  const reviewCount = cases.filter(c => c.estReg === "En Revisión").length;
+  const verifiedCount = cases.filter(c => c.estReg === "Verificado").length;
+  const attentionCount = cases.filter(c => c.estReg === "En Revisión").length;
 
   const confirmDelete = (id: string) => setDeleteId(id);
   const doDelete = () => {
-    if (deleteId) { setCases(prev => prev.filter(c => c.id !== deleteId)); setDeleteId(null); }
+    if (deleteId) {
+      setCases(prev => prev.filter(c => c.id !== deleteId));
+      setDeleteId(null);
+    }
+  };
+
+  const clearFilters = () => {
+    setSearch("");
+    setFilterRecordStatus("Todos");
+    setFilterStatus("Todos");
+    setFilterTipo("Todos");
+    setFilterDelito("Todos");
+    setFilterAnalista("Todos");
+    setFilterDesde("");
+    setFilterHasta("");
   };
 
   const selectCls = "text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none focus:ring-1 focus:ring-ring";
@@ -867,8 +1127,47 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
       <SectionHeader
         title="Gestión de Expedientes"
         sub={`${filtered.length} de ${cases.length} expedientes mostrados`}
-        action={<Btn icon={Plus} onClick={() => setView("case-form")}>Nuevo Expediente</Btn>}
+        action={<Btn icon={Plus} onClick={() => setView("case-new")}>Nuevo Expediente</Btn>}
       />
+
+      {/* Resumen de estatus de registro */}
+<div className="flex gap-2.5 mb-4 overflow-x-auto pb-1">
+  <button
+    onClick={() => setFilterRecordStatus("Todos")}
+    className={`min-w-[200px] flex-1 text-left bg-card border rounded-lg p-3 transition-colors ${filterRecordStatus === "Todos" ? "border-primary ring-1 ring-primary/20" : "border-border hover:bg-muted/20"}`}
+  >
+    <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Total</div>
+    <div className="text-xl font-bold font-mono text-foreground mt-1">{cases.length}</div>
+    <div className="text-[11px] text-muted-foreground mt-1">Expedientes registrados</div>
+  </button>
+
+  <button
+    onClick={() => setFilterRecordStatus("En Revisión")}
+    className={`min-w-[200px] flex-1 text-left bg-card border rounded-lg p-3 transition-colors ${filterRecordStatus === "En Revisión" ? "border-orange-500 ring-1 ring-orange-500/20 bg-orange-50/60 dark:bg-orange-900/10" : "border-border hover:bg-muted/20"}`}
+  >
+    <div className="text-[10px] text-muted-foreground uppercase tracking-wider">En Revisión</div>
+    <div className="text-xl font-bold font-mono text-orange-600 dark:text-orange-400 mt-1">{reviewCount}</div>
+    <div className="text-[11px] text-muted-foreground mt-1">Pendientes de cierre documental</div>
+  </button>
+
+  <button
+    onClick={() => setFilterRecordStatus("Verificado")}
+    className={`min-w-[200px] flex-1 text-left bg-card border rounded-lg p-3 transition-colors ${filterRecordStatus === "Verificado" ? "border-blue-500 ring-1 ring-blue-500/20 bg-blue-50/60 dark:bg-blue-900/10" : "border-border hover:bg-muted/20"}`}
+  >
+    <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Verificado</div>
+    <div className="text-xl font-bold font-mono text-blue-600 dark:text-blue-400 mt-1">{verifiedCount}</div>
+    <div className="text-[11px] text-muted-foreground mt-1">Completamente revisados</div>
+  </button>
+
+  <button
+    onClick={() => setFilterRecordStatus("Requieren atención")}
+    className={`min-w-[220px] flex-1 text-left bg-card border rounded-lg p-3 transition-colors ${filterRecordStatus === "Requieren atención" ? "border-amber-500 ring-1 ring-amber-500/20 bg-amber-50/60 dark:bg-amber-900/10" : "border-border hover:bg-muted/20"}`}
+  >
+    <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Requieren atención</div>
+    <div className="text-xl font-bold font-mono text-amber-600 dark:text-amber-400 mt-1">{attentionCount}</div>
+    <div className="text-[11px] text-muted-foreground mt-1">Casos activos que deben revisarse</div>
+  </button>
+</div>
 
       {/* Filters */}
       <div className="bg-card border border-border rounded-lg p-4 mb-4">
@@ -883,15 +1182,20 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
               placeholder="Buscar por No. sentencia, imputado, delito…"
             />
           </div>
-          {/* Status chips */}
+
+          {/* Estado de registro chips */}
           <div className="flex gap-1.5 flex-wrap">
-            {["Todos", "Prófugo", "Rebeldía", "Recluido", "Absuelto"].map(s => (
-              <button key={s} onClick={() => setFilterStatus(s)}
-                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${filterStatus === s ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-muted"}`}>
+            {["Todos", "En Revisión", "Verificado"].map(s => (
+              <button
+                key={s}
+                onClick={() => setFilterRecordStatus(s)}
+                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${filterRecordStatus === s ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+              >
                 {s}
               </button>
             ))}
           </div>
+
           <div className="flex gap-2 ml-auto">
             <Btn variant="secondary" icon={Download} size="sm" onClick={() => downloadCSV(
               ["Expediente", "No. Sentencia", "Imputado", "Delito", "Estatus", "Alerta", "Estado Reg.", "Asignado", "Fecha"],
@@ -904,6 +1208,22 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
 
         {/* Advanced filters */}
         <div className="flex flex-wrap gap-3 mt-3 pt-3 border-t border-border items-end">
+  <div className="flex flex-col gap-0.5">
+  <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Estatus del Imputado</label>
+  <select
+    value={filterStatus}
+    onChange={e => setFilterStatus(e.target.value)}
+    className={`${selectCls} min-w-[170px]`}
+  >
+    <option value="Todos">Todos</option>
+    <option value="Prófugo">Prófugo</option>
+    <option value="Rebeldía">Rebeldía</option>
+    <option value="Recluido">Recluido</option>
+    <option value="Absuelto">Absuelto</option>
+  </select>
+</div>
+
+
           <div className="flex flex-col gap-0.5">
             <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Tipo de Expediente</label>
             <select value={filterTipo} onChange={e => setFilterTipo(e.target.value)} className={`${selectCls} min-w-[150px]`}>
@@ -911,6 +1231,7 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
               {TIPOS_EXPEDIENTE.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
+
           <div className="flex flex-col gap-0.5">
             <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Delito Principal</label>
             <select value={filterDelito} onChange={e => setFilterDelito(e.target.value)} className={`${selectCls} min-w-[180px]`}>
@@ -918,6 +1239,7 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
               {INFRACCIONES.map(inf => <option key={inf} value={inf}>{inf}</option>)}
             </select>
           </div>
+
           <div className="flex flex-col gap-0.5">
             <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Analista</label>
             <select value={filterAnalista} onChange={e => setFilterAnalista(e.target.value)} className={`${selectCls} min-w-[140px]`}>
@@ -925,18 +1247,19 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
               {["Ana Rodríguez", "Luis Peña", "María Santos", "Pedro Álvarez"].map(a => <option key={a} value={a}>{a}</option>)}
             </select>
           </div>
+
           <div className="flex flex-col gap-0.5">
             <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Fecha desde</label>
-            <input type="date" value={filterDesde} onChange={e => setFilterDesde(e.target.value)}
-              className={`${selectCls} min-w-[140px]`} />
+            <input type="date" value={filterDesde} onChange={e => setFilterDesde(e.target.value)} className={`${selectCls} min-w-[140px]`} />
           </div>
+
           <div className="flex flex-col gap-0.5">
             <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Fecha hasta</label>
-            <input type="date" value={filterHasta} onChange={e => setFilterHasta(e.target.value)}
-              className={`${selectCls} min-w-[140px]`} />
+            <input type="date" value={filterHasta} onChange={e => setFilterHasta(e.target.value)} className={`${selectCls} min-w-[140px]`} />
           </div>
-          {(search || filterStatus !== "Todos" || filterTipo !== "Todos" || filterDelito !== "Todos" || filterAnalista !== "Todos" || filterDesde || filterHasta) && (
-            <button onClick={() => { setSearch(""); setFilterStatus("Todos"); setFilterTipo("Todos"); setFilterDelito("Todos"); setFilterAnalista("Todos"); setFilterDesde(""); setFilterHasta(""); }}
+
+          {(search || filterRecordStatus !== "Todos" || filterStatus !== "Todos" || filterTipo !== "Todos" || filterDelito !== "Todos" || filterAnalista !== "Todos" || filterDesde || filterHasta) && (
+            <button onClick={clearFilters}
               className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-md border border-red-200 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors self-end">
               <X size={12} /> Limpiar filtros
             </button>
@@ -949,8 +1272,7 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
           <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
             <FileSearch size={32} className="opacity-30" />
             <p className="text-sm">No se encontraron expedientes con los filtros aplicados.</p>
-            <button onClick={() => { setSearch(""); setFilterStatus("Todos"); setFilterTipo("Todos"); setFilterDelito("Todos"); setFilterAnalista("Todos"); setFilterDesde(""); setFilterHasta(""); }}
-              className="text-xs text-primary hover:underline">Limpiar filtros</button>
+            <button onClick={clearFilters} className="text-xs text-primary hover:underline">Limpiar filtros</button>
           </div>
         ) : (
           <Table
@@ -1112,27 +1434,142 @@ function LocationTab({ isEdit }: { isEdit: boolean }) {
 
 // ─── Case Detail / Form View ──────────────────────────────────────────────────
 
-function CaseDetailView({ setView, mode }: { setView: (v: View) => void; mode: "detail" | "form" }) {
+function CaseDetailView({
+  setView,
+  mode,
+  initialTab = 0,
+  autoOpenAddDefModal = false,
+  selectedCaseId,
+  onConsumedAutoOpenAddDefModal,
+}: {
+  setView: (v: View) => void;
+  mode: "detail" | "form";
+  initialTab?: number;
+  autoOpenAddDefModal?: boolean;
+  selectedCaseId?: string;
+  onConsumedAutoOpenAddDefModal?: () => void;
+}) {
   const isEdit = mode === "form";
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState(initialTab);
+  const activeCaseId = selectedCaseId?.trim() || "EXP-2024-1847";
 
   // ── Defendants state ──
   const [defs, setDefs] = useState<DefEntry[]>([{
     id: 1, tipo: "Persona Física", nombre: "Carlos Armando Méndez Ríos",
     doc: "001-1182044-3", edad: "47", sexo: "Hombre", nac: "Dominicano/a",
-    estadoImp: "Prófugo", estadoJud: "Condenado", centro: "N/A (Prófugo)",
+    estadoImp: "Prófugo", estadoJud: "Condenado", centro: "N/A",
     penaImp: "15", penaPriv: "15", penaSusp: "0",
     indemnizacion: "2,500,000", garantia: "0", multa: "500,000", decomiso: "2 vehículos, 1 embarcación",
     subidoPN: true, arresto: true, alertaRoja: true, alertaMig: true,
   }]);
   const [showDefModal, setShowDefModal] = useState(false);
   const [newDef, setNewDef] = useState<Omit<DefEntry, "id">>({ ...EMPTY_DEF });
+  const [dialog, setDialog] = useState<null | {
+    title: string;
+    message: string;
+    variant?: "info" | "danger";
+    confirmLabel?: string;
+    cancelLabel?: string;
+    onConfirm: () => void;
+    onCancel?: () => void;
+  }>(null);
+
+  useEffect(() => {
+    if (mode === "form") {
+      setTab(initialTab);
+    }
+  }, [mode, initialTab]);
+
+  useEffect(() => {
+    if (mode === "form" && autoOpenAddDefModal) {
+      setShowDefModal(true);
+      onConsumedAutoOpenAddDefModal?.();
+    }
+  }, [mode, autoOpenAddDefModal, onConsumedAutoOpenAddDefModal]);
+
+  const handleCancelCaseEdit = () => {
+    if (!isEdit) {
+      setView("cases");
+      return;
+    }
+
+    setDialog({
+      title: "Cancelar edición del expediente",
+      message: "Si cancela esta acción, se perderán los cambios realizados en el expediente.",
+      variant: "danger",
+      confirmLabel: "Sí, cancelar",
+      cancelLabel: "Volver",
+      onConfirm: () => {
+        setDialog(null);
+        setView("cases");
+      },
+      onCancel: () => setDialog(null),
+    });
+  };
+
+  const handleSaveCaseEdit = () => {
+    setDialog({
+      title: "Cambios guardados",
+      message: "Los cambios del expediente se guardaron correctamente.",
+      variant: "info",
+      confirmLabel: "Aceptar",
+      onConfirm: () => {
+        setDialog(null);
+        setView("cases");
+      },
+    });
+  };
+
+  const handleCancelAddDef = () => {
+    setDialog({
+      title: "Cancelar imputado",
+      message: "Si cancela esta acción, se perderán los datos digitados del imputado.",
+      variant: "danger",
+      confirmLabel: "Sí, cancelar",
+      cancelLabel: "Volver",
+      onConfirm: () => {
+        setDialog(null);
+        setNewDef({ ...EMPTY_DEF });
+        setShowDefModal(false);
+        if (selectedCaseId) {
+          setView("defendants");
+        }
+      },
+      onCancel: () => setDialog(null),
+    });
+  };
 
   const addDef = () => {
-    if (!newDef.nombre.trim()) return;
+    const allFieldsEmpty = !hasUnsavedDefData(newDef);
+
+    if (allFieldsEmpty) {
+      setDialog({
+        title: "Datos requeridos",
+        message: "Debe completar al menos un campo antes de agregar el imputado.",
+        variant: "info",
+        confirmLabel: "Entendido",
+        onConfirm: () => setDialog(null),
+      });
+      return;
+    }
+
+    if (!newDef.nombre.trim()) {
+      setDialog({
+        title: "Nombre requerido",
+        message: "Debe completar el nombre completo del imputado.",
+        variant: "info",
+        confirmLabel: "Entendido",
+        onConfirm: () => setDialog(null),
+      });
+      return;
+    }
+
     setDefs(prev => [...prev, { ...newDef, id: Date.now() }]);
     setNewDef({ ...EMPTY_DEF });
     setShowDefModal(false);
+    if (selectedCaseId) {
+      setView("defendants");
+    }
   };
   const removeDef = (id: number) => setDefs(prev => prev.filter(d => d.id !== id));
 
@@ -1187,8 +1624,8 @@ function CaseDetailView({ setView, mode }: { setView: (v: View) => void; mode: "
   const exportCaseCSV = () => {
     downloadCSV(
       ["Expediente", "Sentencia", "Imputado", "Documento", "Estado", "Pena", "Alerta Roja", "Alert. Migratoria", "Orden Arresto"],
-      defs.map(d => ["EXP-2024-1847", "SCJ-PEN-2024-0892", d.nombre, d.doc, d.estadoImp, d.penaImp + " años", d.alertaRoja ? "Sí" : "No", d.alertaMig ? "Sí" : "No", d.arresto ? "Sí" : "No"]),
-      "EXP-2024-1847.csv"
+      defs.map(d => [activeCaseId, "SCJ-PEN-2024-0892", d.nombre, d.doc, d.estadoImp, d.penaImp + " años", d.alertaRoja ? "Sí" : "No", d.alertaMig ? "Sí" : "No", d.arresto ? "Sí" : "No"]),
+      `${activeCaseId}.csv`
     );
   };
 
@@ -1202,12 +1639,12 @@ function CaseDetailView({ setView, mode }: { setView: (v: View) => void; mode: "
               <FolderOpen size={12} /> Expedientes
             </button>
             <ChevronRight size={12} className="text-muted-foreground/40" />
-            <span className="text-xs font-mono text-primary">EXP-2024-1847</span>
+            <span className="text-xs font-mono text-primary">{activeCaseId}</span>
           </div>
           <h1 className="text-xl font-semibold text-foreground" style={{ fontFamily: "'Crimson Pro', serif" }}>
             {isEdit ? "Editar Expediente" : "Detalle del Expediente"}
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">No. Sentencia SCJ-PEN-2024-0892 — Lavado de Activos</p>
+          <p className="text-sm text-muted-foreground mt-0.5">{selectedCaseId ? `Expediente seleccionado: ${activeCaseId}` : "No. Sentencia SCJ-PEN-2024-0892 — Lavado de Activos"}</p>
         </div>
         <div className="flex gap-2 flex-wrap justify-end">
           {!isEdit && (
@@ -1219,8 +1656,8 @@ function CaseDetailView({ setView, mode }: { setView: (v: View) => void; mode: "
           )}
           {isEdit && (
             <>
-              <Btn variant="secondary" size="sm" onClick={() => setView("case-detail")}>Cancelar</Btn>
-              <Btn size="sm" icon={CheckCircle} onClick={() => setView("case-detail")}>Guardar Cambios</Btn>
+              <Btn variant="secondary" size="sm" onClick={handleCancelCaseEdit}>Cancelar</Btn>
+              <Btn size="sm" icon={CheckCircle} onClick={handleSaveCaseEdit}>Guardar Cambios</Btn>
             </>
           )}
         </div>
@@ -1305,7 +1742,7 @@ function CaseDetailView({ setView, mode }: { setView: (v: View) => void; mode: "
                     <Sel label="Nacionalidad" value={d.nac} options={NACIONALIDADES} />
                     <Sel label="Estatus del Imputado" value={d.estadoImp} options={ESTADOS_IMPUTADO} />
                     <Sel label="Estatus Judicial" value={d.estadoJud} options={ESTADOS_JUDICIALES} />
-                    <Sel label="Centro Penitenciario" value={d.centro} options={["N/A (Prófugo)", ...CENTROS_PENITENCIARIOS]} />
+                    <Sel label="Centro Penitenciario" value={d.centro} options={["N/A", ...CENTROS_PENITENCIARIOS]} />
                     <Field label="Pena Impuesta (años)" value={d.penaImp} type="number" />
                     <Field label="Pena Privativa (años)" value={d.penaPriv} type="number" />
                     <Field label="Pena Suspendida (años)" value={d.penaSusp} type="number" />
@@ -1484,15 +1921,33 @@ function CaseDetailView({ setView, mode }: { setView: (v: View) => void; mode: "
         </div>
       </div>
 
+      <ActionDialog
+        open={dialog !== null}
+        title={dialog?.title ?? ""}
+        message={dialog?.message ?? ""}
+        variant={dialog?.variant ?? "info"}
+        confirmLabel={dialog?.confirmLabel ?? "Aceptar"}
+        cancelLabel={dialog?.cancelLabel}
+        onConfirm={dialog?.onConfirm ?? (() => setDialog(null))}
+        onCancel={dialog?.onCancel}
+      />
+
       {/* ── Modal: Agregar Imputado ── */}
       {showDefModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card z-10">
               <h2 className="font-semibold text-foreground">Agregar Imputado</h2>
-              <button onClick={() => setShowDefModal(false)}><X size={16} className="text-muted-foreground" /></button>
+              <button onClick={handleCancelAddDef}><X size={16} className="text-muted-foreground" /></button>
             </div>
             <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {selectedCaseId && (
+                <div className="sm:col-span-2 rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-900 px-4 py-3">
+                  <p className="text-xs text-blue-800 dark:text-blue-300 leading-relaxed">
+                    El imputado se agregará al expediente <span className="font-mono font-semibold">{activeCaseId}</span>.
+                  </p>
+                </div>
+              )}
               {([
                 ["Tipo de Entidad", "tipo", "select", ["Persona Física", "Persona Jurídica"]],
                 ["Nombre completo *", "nombre", "text"],
@@ -1502,7 +1957,7 @@ function CaseDetailView({ setView, mode }: { setView: (v: View) => void; mode: "
                 ["Nacionalidad", "nac", "select", NACIONALIDADES],
                 ["Estatus del Imputado", "estadoImp", "select", ESTADOS_IMPUTADO],
                 ["Estatus Judicial", "estadoJud", "select", ESTADOS_JUDICIALES],
-                ["Centro Penitenciario", "centro", "select", ["N/A (Prófugo)", ...CENTROS_PENITENCIARIOS]],
+                ["Centro Penitenciario", "centro", "select", ["N/A", ...CENTROS_PENITENCIARIOS]],
                 ["Pena Impuesta (años)", "penaImp", "number"],
                 ["Pena Privativa (años)", "penaPriv", "number"],
                 ["Pena Suspendida (años)", "penaSusp", "number"],
@@ -1514,6 +1969,7 @@ function CaseDetailView({ setView, mode }: { setView: (v: View) => void; mode: "
                   <label className="block text-xs font-medium text-muted-foreground mb-1 uppercase tracking-wider">{lbl}</label>
                   {tp === "select"
                     ? <select value={String(newDef[fld] ?? "")} onChange={e => setNewDef(p => ({ ...p, [fld]: e.target.value }))} className="w-full px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground">
+                        <option value="">Seleccione una opción</option>
                         {(opts ?? []).map(o => <option key={o} value={o}>{o}</option>)}
                       </select>
                     : <input type={tp} value={String(newDef[fld] ?? "")} onChange={e => setNewDef(p => ({ ...p, [fld]: e.target.value }))} className="w-full px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground" />
@@ -1537,7 +1993,7 @@ function CaseDetailView({ setView, mode }: { setView: (v: View) => void; mode: "
               </div>
             </div>
             <div className="flex gap-2 justify-end px-6 pb-5 sticky bottom-0 bg-card border-t border-border pt-4">
-              <Btn variant="secondary" onClick={() => setShowDefModal(false)}>Cancelar</Btn>
+              <Btn variant="secondary" onClick={handleCancelAddDef}>Cancelar</Btn>
               <Btn icon={Plus} onClick={addDef}>Agregar Imputado</Btn>
             </div>
           </div>
@@ -1569,6 +2025,202 @@ function CaseDetailView({ setView, mode }: { setView: (v: View) => void; mode: "
               <Btn variant="secondary" onClick={() => setShowVicModal(false)}>Cancelar</Btn>
               <Btn icon={Plus} onClick={addVic}>Agregar Víctima</Btn>
             </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── New Case View ───────────────────────────────────────────────────────────
+function NewCaseView({ setView }: { setView: (v: View) => void }) {
+  const [tab, setTab] = useState(0);
+  const [showDefModal, setShowDefModal] = useState(false);
+  const [showVicModal, setShowVicModal] = useState(false);
+  const [dialog, setDialog] = useState<null | {
+    title: string;
+    message: string;
+    variant?: "info" | "danger";
+    confirmLabel?: string;
+    cancelLabel?: string;
+    onConfirm: () => void;
+    onCancel?: () => void;
+  }>(null);
+  const [general, setGeneral] = useState({
+    fechaRecepcion: "",
+    sentencia: "",
+    tipoExpediente: "",
+    jurisdiccion: "",
+    localidad: "",
+    fechaDecision: "",
+    decision: "",
+    interpone: "",
+    estadoRegistro: "",
+    asignado: "",
+    creadoPor: "",
+    fechaCreacion: "",
+  });
+  const [defs, setDefs] = useState<DefEntry[]>([]);
+  const [newDef, setNewDef] = useState<Omit<DefEntry, "id">>({ ...EMPTY_DEF });
+  const [vics, setVics] = useState<VicEntry[]>([]);
+  const [newVic, setNewVic] = useState({ tipo: "Persona Física", nombre: "" });
+  const [measures, setMeasures] = useState({ arresto: false, roja: false, migratoria: false, policia: false });
+  const [location, setLocation] = useState({ provincia: "", municipio: "", sector: "", direccion: "", delito: "", tiposPenales: "" });
+  const [observation, setObservation] = useState("");
+
+  const municipios = useMemo(() => location.provincia ? getMunicipios(location.provincia) : [], [location.provincia]);
+  const sectores = useMemo(() => (location.provincia && location.municipio) ? getSectores(location.provincia, location.municipio) : [], [location.provincia, location.municipio]);
+  const tabs = ["Datos Generales", "Imputados", "Víctimas", "Medidas / Alertas", "Localización", "Documentos", "Observaciones"];
+  const inputCls = 'w-full px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground placeholder:text-muted-foreground/50';
+  const labelCls = 'block text-xs font-medium text-muted-foreground mb-1 uppercase tracking-wider';
+
+  const updateGeneral = (key: keyof typeof general, value: string) => setGeneral(prev => ({ ...prev, [key]: value }));
+  const updateLocation = (key: keyof typeof location, value: string) => setLocation(prev => ({ ...prev, [key]: value }));
+  const toggleMeasure = (k: keyof typeof measures) => setMeasures(prev => ({ ...prev, [k]: !prev[k] }));
+
+  const hasUnsavedNewCaseData = () => {
+    const generalHasData = Object.values(general).some(v => String(v ?? "").trim() !== "");
+    const locationHasData = Object.values(location).some(v => String(v ?? "").trim() !== "");
+    const measuresHasData = Object.values(measures).some(Boolean);
+    const observationHasData = observation.trim() !== "";
+    const defsHasData = defs.length > 0;
+    const vicsHasData = vics.length > 0;
+    return generalHasData || locationHasData || measuresHasData || observationHasData || defsHasData || vicsHasData;
+  };
+
+  const handleCancelNewCase = () => {
+    if (!hasUnsavedNewCaseData()) {
+      setView("cases");
+      return;
+    }
+
+    setDialog({
+      title: "Cancelar nuevo expediente",
+      message: "Si cancela esta acción, se perderán los datos digitados del expediente.",
+      variant: "danger",
+      confirmLabel: "Sí, cancelar",
+      cancelLabel: "Volver",
+      onConfirm: () => {
+        setDialog(null);
+        setView("cases");
+      },
+      onCancel: () => setDialog(null),
+    });
+  };
+
+  const addDef = () => {
+    if (!newDef.nombre.trim()) return;
+    setDefs(prev => [...prev, { ...newDef, id: Date.now() }]);
+    setNewDef({ ...EMPTY_DEF });
+    setShowDefModal(false);
+  };
+  const removeDef = (id: number) => setDefs(prev => prev.filter(d => d.id !== id));
+  const addVic = () => {
+    if (!newVic.nombre.trim()) return;
+    setVics(prev => [...prev, { id: Date.now(), ...newVic }]);
+    setNewVic({ tipo: "Persona Física", nombre: "" });
+    setShowVicModal(false);
+  };
+  const removeVic = (id: number) => setVics(prev => prev.filter(v => v.id !== id));
+
+  return (
+    <div className="p-6">
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <button onClick={() => setView("cases")} className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1">
+              <FolderOpen size={12} /> Expedientes
+            </button>
+            <ChevronRight size={12} className="text-muted-foreground/40" />
+            <span className="text-xs font-mono text-primary">Nuevo expediente</span>
+          </div>
+          <h1 className="text-xl font-semibold text-foreground" style={{ fontFamily: "'Crimson Pro', serif" }}>Nuevo Expediente</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Complete los datos para registrar un nuevo expediente.</p>
+        </div>
+        <div className="flex gap-2 flex-wrap justify-end">
+          <Btn variant="secondary" size="sm" onClick={handleCancelNewCase}>Cancelar</Btn>
+          <Btn size="sm" icon={CheckCircle} onClick={() => setView("cases")}>Guardar Cambios</Btn>
+        </div>
+      </div>
+
+      <div className="bg-card border border-border rounded-lg overflow-hidden">
+        <div className="flex border-b border-border overflow-x-auto">
+          {tabs.map((t, i) => (
+            <button key={i} onClick={() => setTab(i)} className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${tab === i ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+              {t}
+              {i === 1 && <span className="ml-1.5 font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded">{defs.length}</span>}
+              {i === 2 && <span className="ml-1.5 font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded">{vics.length}</span>}
+            </button>
+          ))}
+        </div>
+        <div className="p-6">
+          <div className={tab === 0 ? "" : "hidden"}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              <div><label className={labelCls}>Fecha de recepción<span className="text-red-500 ml-0.5">*</span></label><input type="date" value={general.fechaRecepcion} onChange={e => updateGeneral("fechaRecepcion", e.target.value)} className={inputCls} /></div>
+              <div><label className={labelCls}>No. Sentencia / Resolución<span className="text-red-500 ml-0.5">*</span></label><input value={general.sentencia} onChange={e => updateGeneral("sentencia", e.target.value)} className={inputCls} /></div>
+              <div><label className={labelCls}>Tipo de Expediente<span className="text-red-500 ml-0.5">*</span></label><select value={general.tipoExpediente} onChange={e => updateGeneral("tipoExpediente", e.target.value)} className={inputCls}><option value="">Seleccione una opción</option>{TIPOS_EXPEDIENTE.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+              <div><label className={labelCls}>Jurisdicción<span className="text-red-500 ml-0.5">*</span></label><input value={general.jurisdiccion} onChange={e => updateGeneral("jurisdiccion", e.target.value)} className={inputCls} /></div>
+              <div><label className={labelCls}>Localidad de Jurisdicción</label><select value={general.localidad} onChange={e => updateGeneral("localidad", e.target.value)} className={inputCls}><option value="">Seleccione una opción</option>{JURISDICCIONES.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+              <div><label className={labelCls}>Fecha de la Decisión<span className="text-red-500 ml-0.5">*</span></label><input type="date" value={general.fechaDecision} onChange={e => updateGeneral("fechaDecision", e.target.value)} className={inputCls} /></div>
+              <div><label className={labelCls}>Decisión</label><select value={general.decision} onChange={e => updateGeneral("decision", e.target.value)} className={inputCls}><option value="">Seleccione una opción</option>{DECISIONES.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+              <div><label className={labelCls}>Quién Interpone el Recurso</label><select value={general.interpone} onChange={e => updateGeneral("interpone", e.target.value)} className={inputCls}><option value="">Seleccione una opción</option>{QUIEN_INTERPONE.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+              <div><label className={labelCls}>Estado del Registro</label><select value={general.estadoRegistro} onChange={e => updateGeneral("estadoRegistro", e.target.value)} className={inputCls}><option value="">Seleccione una opción</option>{ESTADOS_REGISTRO.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+              <div><label className={labelCls}>Asignado a</label><select value={general.asignado} onChange={e => updateGeneral("asignado", e.target.value)} className={inputCls}><option value="">Seleccione una opción</option>{["Ana Rodríguez", "Luis Peña", "María Santos", "Pedro Álvarez"].map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+              <div><label className={labelCls}>Creado por</label><input value={general.creadoPor} onChange={e => updateGeneral("creadoPor", e.target.value)} className={inputCls} /></div>
+              <div><label className={labelCls}>Fecha de Creación</label><input value={general.fechaCreacion} onChange={e => updateGeneral("fechaCreacion", e.target.value)} className={inputCls} /></div>
+            </div>
+          </div>
+          <div className={tab === 1 ? "" : "hidden"}>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between"><h3 className="font-medium text-foreground">Imputados registrados ({defs.length})</h3><Btn variant="secondary" icon={Plus} size="sm" onClick={() => setShowDefModal(true)}>Agregar Imputado</Btn></div>
+              {defs.length === 0 ? <div className="flex flex-col items-center gap-3 py-12 text-muted-foreground border border-border rounded-lg"><UserX size={32} className="opacity-30" /><p className="text-sm">No hay imputados registrados todavía.</p></div> : defs.map((d, idx) => <div key={d.id} className="border border-border rounded-lg overflow-hidden"><div className="bg-muted/30 px-4 py-2.5 border-b border-border flex items-center justify-between"><div className="flex items-center gap-2"><span className="text-xs font-semibold text-foreground uppercase tracking-wider">Imputado #{idx + 1}</span>{d.estadoImp && <Badge label={d.estadoImp} />}</div><button onClick={() => removeDef(d.id)} className="flex items-center gap-1 px-2 py-1 rounded text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"><Trash2 size={12} /> Eliminar</button></div><div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm"><div><span className="text-xs text-muted-foreground uppercase tracking-wider">Nombre</span><p className="mt-1 text-foreground">{d.nombre || '—'}</p></div><div><span className="text-xs text-muted-foreground uppercase tracking-wider">Documento</span><p className="mt-1 text-foreground">{d.doc || '—'}</p></div><div><span className="text-xs text-muted-foreground uppercase tracking-wider">Sexo</span><p className="mt-1 text-foreground">{d.sexo || '—'}</p></div></div></div>)}
+            </div>
+          </div>
+          <div className={tab === 2 ? "" : "hidden"}>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between"><h3 className="font-medium text-foreground">Víctimas registradas ({vics.length})</h3><Btn variant="secondary" icon={Plus} size="sm" onClick={() => setShowVicModal(true)}>Agregar Víctima</Btn></div>
+              {vics.length === 0 ? <div className="flex flex-col items-center gap-3 py-12 text-muted-foreground border border-border rounded-lg"><Users size={32} className="opacity-30" /><p className="text-sm">No hay víctimas registradas todavía.</p></div> : vics.map((v, i) => <div key={v.id} className="border border-border rounded-lg p-4"><div className="flex items-center justify-between mb-3"><span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Víctima #{i + 1}</span><button onClick={() => removeVic(v.id)} className="flex items-center gap-1 px-2 py-1 rounded text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"><Trash2 size={12} /> Eliminar</button></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm"><div><span className="text-xs text-muted-foreground uppercase tracking-wider">Tipo</span><p className="mt-1 text-foreground">{v.tipo}</p></div><div><span className="text-xs text-muted-foreground uppercase tracking-wider">Nombre / Razón Social</span><p className="mt-1 text-foreground">{v.nombre}</p></div></div></div>)}
+            </div>
+          </div>
+          <div className={tab === 3 ? "" : "hidden"}>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">{[{ key: "arresto" as const, label: "Orden de Arresto", icon: Lock, color: "text-amber-600" }, { key: "roja" as const, label: "Alerta Roja (Interpol)", icon: AlertOctagon, color: "text-red-600" }, { key: "migratoria" as const, label: "Alerta Migratoria", icon: Globe, color: "text-indigo-600" }, { key: "policia" as const, label: "Subido a Policía Nacional", icon: Shield, color: "text-teal-600" }].map(({ key, label, icon: Icon, color }) => { const active = measures[key]; return <div key={key} className={`flex items-center justify-between p-4 border rounded-lg transition-colors ${active ? "border-emerald-200 bg-emerald-50 dark:border-emerald-900/30 dark:bg-emerald-900/10" : "border-border bg-muted/20"}`}><div className="flex items-center gap-3"><Icon size={18} className={color} /><span className="text-sm font-medium text-foreground">{label}</span></div><button onClick={() => toggleMeasure(key)} className={`px-3 py-1 rounded text-xs font-mono font-medium transition-colors ${active ? "bg-emerald-600 text-white hover:bg-emerald-700" : "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"}`}>{active ? "ACTIVA" : "INACTIVA"}</button></div>; })}</div>
+              <div className="border border-border rounded-lg p-4"><label className={labelCls}>Observaciones de medidas</label><textarea rows={3} className={`${inputCls} resize-none`} placeholder="Escriba observaciones sobre las medidas o alertas..." /></div>
+            </div>
+          </div>
+          <div className={tab === 4 ? "" : "hidden"}><div className="space-y-4"><div className="border border-border rounded-lg p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"><div><label className={labelCls}>Provincia<span className="text-red-500 ml-0.5">*</span></label><select value={location.provincia} onChange={e => setLocation(prev => ({ ...prev, provincia: e.target.value, municipio: "", sector: "" }))} className={inputCls}><option value="">Seleccione una provincia</option>{PROVINCIAS.map(p => <option key={p} value={p}>{p}</option>)}</select></div><div><label className={labelCls}>Municipio</label><select value={location.municipio} onChange={e => setLocation(prev => ({ ...prev, municipio: e.target.value, sector: "" }))} className={inputCls}><option value="">Seleccione un municipio</option>{municipios.map(m => <option key={m} value={m}>{m}</option>)}</select></div><div><label className={labelCls}>Sector</label><select value={location.sector} onChange={e => updateLocation("sector", e.target.value)} className={inputCls}><option value="">Seleccione un sector</option>{sectores.map(s => <option key={s} value={s}>{s}</option>)}</select></div><div className="sm:col-span-2 lg:col-span-3"><label className={labelCls}>Dirección Detallada</label><textarea rows={2} value={location.direccion} onChange={e => updateLocation("direccion", e.target.value)} className={`${inputCls} resize-none`} /></div><div><label className={labelCls}>Delito Principal<span className="text-red-500 ml-0.5">*</span></label><select value={location.delito} onChange={e => updateLocation("delito", e.target.value)} className={inputCls}><option value="">Seleccione un delito</option>{INFRACCIONES.map(inf => <option key={inf} value={inf}>{inf}</option>)}</select></div><div className="sm:col-span-2"><label className={labelCls}>Tipos Penales (texto libre)</label><input value={location.tiposPenales} onChange={e => updateLocation("tiposPenales", e.target.value)} className={inputCls} /></div></div></div></div>
+          <div className={tab === 5 ? "" : "hidden"}><div className="space-y-4"><div className="border-2 border-dashed border-border rounded-lg p-8 flex flex-col items-center gap-3 hover:border-primary/40 transition-colors"><Upload size={24} className="text-muted-foreground" /><div className="text-center"><p className="text-sm font-medium text-foreground">Arrastre documentos aquí o haga clic para seleccionar</p><p className="text-xs text-muted-foreground mt-1">PDF, DOCX, XLSX, JPG, PNG — Máx. 20MB por archivo</p></div><Btn variant="secondary" size="sm">Seleccionar archivos</Btn></div><div className="flex flex-col items-center gap-3 py-10 text-muted-foreground border border-border rounded-lg"><FileText size={28} className="opacity-30" /><p className="text-sm">Todavía no hay documentos asociados a este expediente.</p></div></div></div>
+          <div className={tab === 6 ? "" : "hidden"}><div className="space-y-4"><div><label className={labelCls}>Observación general del caso</label><textarea value={observation} onChange={e => setObservation(e.target.value)} rows={5} className={`${inputCls} resize-none`} placeholder="Escriba una observación general del expediente..." /></div><div className="border border-border rounded-lg overflow-hidden"><div className="bg-muted/30 px-4 py-2.5 border-b border-border"><p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Historial de Cambios</p></div><div className="px-4 py-10 text-center text-sm text-muted-foreground">Aún no hay historial para este nuevo expediente.</div></div></div></div>
+        </div>
+      </div>
+
+      <ActionDialog
+        open={dialog !== null}
+        title={dialog?.title ?? ""}
+        message={dialog?.message ?? ""}
+        variant={dialog?.variant ?? "info"}
+        confirmLabel={dialog?.confirmLabel ?? "Aceptar"}
+        cancelLabel={dialog?.cancelLabel}
+        onConfirm={dialog?.onConfirm ?? (() => setDialog(null))}
+        onCancel={dialog?.onCancel}
+      />
+
+      {showDefModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card z-10"><h2 className="font-semibold text-foreground">Agregar Imputado</h2><button onClick={() => setShowDefModal(false)}><X size={16} className="text-muted-foreground" /></button></div>
+            <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">{([["Tipo de Entidad", "tipo", "select", ["Persona Física", "Persona Jurídica"]],["Nombre completo *", "nombre", "text"],["Documento de Identidad *", "doc", "text"],["Edad", "edad", "number"],["Sexo", "sexo", "select", SEXOS],["Nacionalidad", "nac", "select", NACIONALIDADES],["Estatus del Imputado", "estadoImp", "select", ESTADOS_IMPUTADO],["Estatus Judicial", "estadoJud", "select", ESTADOS_JUDICIALES],["Centro Penitenciario", "centro", "select", ["N/A", ...CENTROS_PENITENCIARIOS]]] as [string, keyof Omit<DefEntry,"id">, string, string[]?][]).map(([lbl, fld, tp, opts]) => <div key={fld}><label className={labelCls}>{lbl}</label>{tp === "select" ? <select value={String(newDef[fld] ?? "")} onChange={e => setNewDef(p => ({ ...p, [fld]: e.target.value }))} className={inputCls}><option value="">Seleccione una opción</option>{(opts ?? []).map(o => <option key={o} value={o}>{o}</option>)}</select> : <input type={tp} value={String(newDef[fld] ?? "")} onChange={e => setNewDef(p => ({ ...p, [fld]: e.target.value }))} className={inputCls} />}</div>)}</div>
+            <div className="flex gap-2 justify-end px-6 pb-5 sticky bottom-0 bg-card border-t border-border pt-4"><Btn variant="secondary" onClick={() => setShowDefModal(false)}>Cancelar</Btn><Btn icon={Plus} onClick={addDef}>Agregar Imputado</Btn></div>
+          </div>
+        </div>
+      )}
+
+      {showVicModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border"><h2 className="font-semibold text-foreground">Agregar Víctima</h2><button onClick={() => setShowVicModal(false)}><X size={16} className="text-muted-foreground" /></button></div>
+            <div className="p-6 space-y-4"><div><label className={labelCls}>Tipo de Persona *</label><select value={newVic.tipo} onChange={e => setNewVic(p => ({ ...p, tipo: e.target.value }))} className={inputCls}><option>Persona Física</option><option>Persona Jurídica</option></select></div><div><label className={labelCls}>Nombre / Razón Social *</label><input value={newVic.nombre} onChange={e => setNewVic(p => ({ ...p, nombre: e.target.value }))} className={inputCls} /></div></div>
+            <div className="flex gap-2 justify-end px-6 pb-5"><Btn variant="secondary" onClick={() => setShowVicModal(false)}>Cancelar</Btn><Btn icon={Plus} onClick={addVic}>Agregar Víctima</Btn></div>
           </div>
         </div>
       )}
@@ -1751,6 +2403,15 @@ function UsersView() {
   const [selected, setSelected] = useState<UserEntry | null>(null);
   const [editForm, setEditForm] = useState<Partial<UserEntry>>({});
   const [newPwd, setNewPwd] = useState({ pwd: "", confirm: "" });
+  const [dialog, setDialog] = useState<null | {
+    title: string;
+    message: string;
+    variant?: "info" | "danger";
+    confirmLabel?: string;
+    cancelLabel?: string;
+    onConfirm: () => void;
+    onCancel?: () => void;
+  }>(null);
 
   const filtered = users.filter(u => {
     if (!search) return true;
@@ -1763,6 +2424,32 @@ function UsersView() {
     setEditForm(u ? { ...u } : {});
     setNewPwd({ pwd: "", confirm: "" });
     setModal(m);
+  };
+
+  const handleCancelResetModal = () => {
+    const hasTypedPassword = newPwd.pwd.trim() !== "" || newPwd.confirm.trim() !== "";
+
+    if (!hasTypedPassword) {
+      setNewPwd({ pwd: "", confirm: "" });
+      setSearch("");
+      setModal(null);
+      return;
+    }
+
+    setDialog({
+      title: "Cancelar reseteo de contraseña",
+      message: "Si cancela esta acción, se perderán los datos digitados de la nueva contraseña.",
+      variant: "danger",
+      confirmLabel: "Sí, cancelar",
+      cancelLabel: "Volver",
+      onConfirm: () => {
+        setDialog(null);
+        setNewPwd({ pwd: "", confirm: "" });
+        setSearch("");
+        setModal(null);
+      },
+      onCancel: () => setDialog(null),
+    });
   };
 
   const saveEdit = () => {
@@ -1810,9 +2497,17 @@ function UsersView() {
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
           <div className="relative flex-1 max-w-xs">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={search} onChange={e => setSearch(e.target.value)}
+            <input
+              name="usuarios-search"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
               className="w-full pl-8 pr-3 py-1.5 text-sm bg-muted/60 border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground placeholder:text-muted-foreground/60"
-              placeholder="Buscar por nombre, usuario, email…" />
+              placeholder="Buscar por nombre, usuario, email…"
+            />
           </div>
           <Btn variant="secondary" icon={Download} size="sm" onClick={() => downloadCSV(
             ["Usuario", "Nombre", "Email", "Rol", "Estado", "Último Acceso"],
@@ -1847,6 +2542,17 @@ function UsersView() {
           <span className="text-xs text-muted-foreground font-mono">{filtered.length} usuario(s)</span>
         </div>
       </div>
+
+      <ActionDialog
+        open={dialog !== null}
+        title={dialog?.title ?? ""}
+        message={dialog?.message ?? ""}
+        variant={dialog?.variant ?? "info"}
+        confirmLabel={dialog?.confirmLabel ?? "Aceptar"}
+        cancelLabel={dialog?.cancelLabel}
+        onConfirm={dialog?.onConfirm ?? (() => setDialog(null))}
+        onCancel={dialog?.onCancel}
+      />
 
       {/* Permissions matrix */}
       <div className="mt-6 bg-card border border-border rounded-lg overflow-hidden">
@@ -1972,7 +2678,7 @@ function UsersView() {
           <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md">
             <div className="flex items-center justify-between px-6 py-4 border-b border-border">
               <h2 className="font-semibold text-foreground">Resetear Contraseña</h2>
-              <button onClick={() => setModal(null)}><X size={16} className="text-muted-foreground" /></button>
+              <button onClick={handleCancelResetModal}><X size={16} className="text-muted-foreground" /></button>
             </div>
             <div className="p-6 space-y-4">
               <div className="flex items-center gap-3 px-4 py-3 bg-amber-50 dark:bg-amber-900/15 border border-amber-200 dark:border-amber-800/30 rounded-lg">
@@ -1981,18 +2687,18 @@ function UsersView() {
               </div>
               <div>
                 <label className={lbl}>Nueva contraseña temporal</label>
-                <input type="password" value={newPwd.pwd} onChange={e => setNewPwd(p => ({ ...p, pwd: e.target.value }))} className={inp} placeholder="Mínimo 8 caracteres" />
+                <input type="password" value={newPwd.pwd} onChange={e => setNewPwd(p => ({ ...p, pwd: e.target.value }))} className={inp} placeholder="Mínimo 8 caracteres" autoComplete="new-password" />
               </div>
               <div>
                 <label className={lbl}>Confirmar contraseña</label>
-                <input type="password" value={newPwd.confirm} onChange={e => setNewPwd(p => ({ ...p, confirm: e.target.value }))} className={inp} placeholder="Repita la contraseña" />
+                <input type="password" value={newPwd.confirm} onChange={e => setNewPwd(p => ({ ...p, confirm: e.target.value }))} className={inp} placeholder="Repita la contraseña" autoComplete="new-password" />
               </div>
               {newPwd.pwd && newPwd.confirm && newPwd.pwd !== newPwd.confirm && (
                 <p className="text-xs text-red-600">Las contraseñas no coinciden.</p>
               )}
             </div>
             <div className="flex gap-2 justify-end px-6 pb-5">
-              <Btn variant="secondary" onClick={() => setModal(null)}>Cancelar</Btn>
+              <Btn variant="secondary" onClick={handleCancelResetModal}>Cancelar</Btn>
               <Btn icon={Lock} onClick={() => setModal(null)} variant="primary">Restablecer Contraseña</Btn>
             </div>
           </div>
@@ -2158,11 +2864,23 @@ function AuditView() {
 
 // ─── Defendants View ──────────────────────────────────────────────────────────
 
-function DefendantsView({ setView }: { setView: (v: View) => void }) {
+function DefendantsView({ setView, openAddImputado }: { setView: (v: View) => void; openAddImputado: (caseId: string) => void }) {
   const [defs, setDefs] = useState(defendants);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("Todos");
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [showSelectCaseForDef, setShowSelectCaseForDef] = useState(false);
+  const [caseSearch, setCaseSearch] = useState("");
+  const [selectedCaseForDef, setSelectedCaseForDef] = useState("");
+  const [dialog, setDialog] = useState<null | {
+    title: string;
+    message: string;
+    variant?: "info" | "danger";
+    confirmLabel?: string;
+    cancelLabel?: string;
+    onConfirm: () => void;
+    onCancel?: () => void;
+  }>(null);
 
   const filtered = useMemo(() => defs.filter(d => {
     if (filterStatus !== "Todos" && d.estatus !== filterStatus) return false;
@@ -2171,12 +2889,44 @@ function DefendantsView({ setView }: { setView: (v: View) => void }) {
     return true;
   }), [defs, search, filterStatus]);
 
+  const selectableCases = useMemo(() => {
+    const q = caseSearch.toLowerCase().trim();
+    if (!q) return recentCases;
+    return recentCases.filter(c =>
+      c.id.toLowerCase().includes(q) ||
+      c.sentencia.toLowerCase().includes(q) ||
+      c.imputado.toLowerCase().includes(q)
+    );
+  }, [caseSearch]);
+
+  const handleOpenAddDefFlow = () => {
+    setCaseSearch("");
+    setSelectedCaseForDef("");
+    setShowSelectCaseForDef(true);
+  };
+
+  const handleContinueAddDefFlow = () => {
+    const caseId = selectedCaseForDef.trim();
+    if (!caseId) {
+      setDialog({
+        title: "Expediente requerido",
+        message: "Debe seleccionar o escribir un número de expediente para continuar.",
+        variant: "info",
+        confirmLabel: "Entendido",
+        onConfirm: () => setDialog(null),
+      });
+      return;
+    }
+    setShowSelectCaseForDef(false);
+    openAddImputado(caseId);
+  };
+
   return (
     <div className="p-6">
       <SectionHeader
         title="Gestión de Imputados"
         sub={`${filtered.length} de ${defs.length} imputados mostrados`}
-        action={<Btn icon={Plus} onClick={() => setView("case-form")}>Agregar Imputado</Btn>}
+        action={<Btn icon={Plus} onClick={handleOpenAddDefFlow}>Agregar Imputado</Btn>}
       />
       <div className="bg-card border border-border rounded-lg p-4 mb-4">
         <div className="flex flex-wrap gap-3 items-center">
@@ -2223,34 +2973,132 @@ function DefendantsView({ setView }: { setView: (v: View) => void }) {
               <Chk v={d.policia} cls="bg-teal-100 text-teal-600 dark:bg-teal-900/25" />,
               <span className="font-mono text-xs text-primary cursor-pointer hover:underline" onClick={() => setView("case-detail")}>{d.exp}</span>,
               <div className="flex gap-1">
-                <button title="Ver expediente" className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground" onClick={() => setView("case-detail")}><Eye size={13} /></button>
-                <button title="Editar imputado" className="p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 text-muted-foreground hover:text-blue-600" onClick={() => setView("case-form")}><Edit2 size={13} /></button>
-                <button title="Eliminar" className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-600" onClick={() => setDeleteId(d.id)}><Trash2 size={13} /></button>
+                <button title="Ver expediente" className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" onClick={() => setView("case-detail")}><Eye size={13} /></button>
+                <button title="Editar imputado" className="p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 text-muted-foreground hover:text-blue-600 transition-colors" onClick={() => setView("case-form")}><Edit2 size={13} /></button>
+                <button title="Eliminar imputado" className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-600 transition-colors" onClick={() => setDeleteId(d.id)}><Trash2 size={13} /></button>
               </div>
             ];
           })}
         />
-        <div className="px-4 pb-4 border-t border-border pt-3">
+        <div className="px-4 pb-4 border-t border-border pt-3 flex items-center justify-between">
           <span className="text-xs text-muted-foreground font-mono">{filtered.length} resultado(s)</span>
+          <Pagination />
         </div>
       </div>
+
+      {showSelectCaseForDef && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+              <div>
+                <h2 className="font-semibold text-foreground">Seleccionar expediente</h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Seleccione un número de expediente existente o escríbalo manualmente para continuar a la ventana de agregar imputado.
+                </p>
+              </div>
+              <button onClick={() => setShowSelectCaseForDef(false)}>
+                <X size={16} className="text-muted-foreground" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1 uppercase tracking-wider">Buscar expediente</label>
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      value={caseSearch}
+                      onChange={e => setCaseSearch(e.target.value)}
+                      placeholder="Buscar por expediente, sentencia o imputado…"
+                      className="w-full pl-8 pr-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1 uppercase tracking-wider">Expediente seleccionado</label>
+                  <input
+                    value={selectedCaseForDef}
+                    onChange={e => setSelectedCaseForDef(e.target.value)}
+                    placeholder="Escriba el número de expediente"
+                    className="w-full px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground"
+                  />
+                </div>
+              </div>
+
+              <div className="border border-border rounded-lg overflow-hidden">
+                <div className="px-4 py-2.5 border-b border-border bg-muted/30 flex items-center justify-between">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Expedientes disponibles</p>
+                  <span className="text-[11px] text-muted-foreground font-mono">{selectableCases.length} resultado(s)</span>
+                </div>
+                <div className="max-h-72 overflow-y-auto divide-y divide-border">
+                  {selectableCases.length > 0 ? selectableCases.map(c => {
+                    const active = selectedCaseForDef === c.id;
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setSelectedCaseForDef(c.id)}
+                        className={`w-full text-left px-4 py-3 transition-colors ${active ? "bg-blue-50 dark:bg-blue-900/20" : "hover:bg-muted/30"}`}
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="min-w-0">
+                            <p className={`font-mono text-xs ${active ? "text-primary" : "text-foreground"}`}>{c.id}</p>
+                            <p className="text-sm text-foreground truncate mt-1">{c.imputado}</p>
+                            <p className="text-xs text-muted-foreground mt-1 truncate">{c.sentencia} · {c.delito}</p>
+                          </div>
+                          <Badge label={c.estatus} />
+                        </div>
+                      </button>
+                    );
+                  }) : (
+                    <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                      No se encontraron expedientes con ese criterio de búsqueda.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 justify-end px-6 py-4 border-t border-border bg-card">
+              <Btn variant="secondary" onClick={() => setShowSelectCaseForDef(false)}>
+                Cancelar
+              </Btn>
+              <Btn icon={Plus} onClick={handleContinueAddDefFlow}>
+                Continuar
+              </Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ActionDialog
+        open={dialog !== null}
+        title={dialog?.title ?? ""}
+        message={dialog?.message ?? ""}
+        variant={dialog?.variant ?? "info"}
+        confirmLabel={dialog?.confirmLabel ?? "Aceptar"}
+        cancelLabel={dialog?.cancelLabel}
+        onConfirm={dialog?.onConfirm ?? (() => setDialog(null))}
+        onCancel={dialog?.onCancel}
+      />
 
       {deleteId !== null && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-sm p-6">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
                 <Trash2 size={18} className="text-red-600" />
               </div>
               <div>
                 <h3 className="font-semibold text-foreground">Eliminar Imputado</h3>
-                <p className="text-xs text-muted-foreground">{defs.find(d => d.id === deleteId)?.nombre}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{defs.find(d => d.id === deleteId)?.nombre}</p>
               </div>
             </div>
-            <p className="text-sm text-foreground mb-6">¿Está seguro que desea eliminar este registro? Esta acción no se puede deshacer.</p>
+            <p className="text-sm text-foreground mb-6">¿Está seguro que desea eliminar este imputado? Esta acción no se puede deshacer.</p>
             <div className="flex gap-2 justify-end">
               <Btn variant="secondary" onClick={() => setDeleteId(null)}>Cancelar</Btn>
-              <Btn variant="danger" icon={Trash2} onClick={() => { setDefs(p => p.filter(d => d.id !== deleteId)); setDeleteId(null); }}>Eliminar</Btn>
+              <Btn variant="danger" icon={Trash2} onClick={() => { setDefs(prev => prev.filter(d => d.id !== deleteId)); setDeleteId(null); }}>Eliminar</Btn>
             </div>
           </div>
         </div>
@@ -2466,11 +3314,35 @@ const measuresData = [
 ];
 
 function MeasuresView({ setView }: { setView: (v: View) => void }) {
-  const [measures, setMeasures] = useState(measuresData);
+  type MeasureEntry = typeof measuresData[0];
+  const EMPTY_MEASURE: Omit<MeasureEntry, "id"> = {
+    tipo: "Alerta Roja",
+    imputado: "",
+    exp: "",
+    delito: "",
+    activadaPor: "",
+    fecha: "",
+    activa: true,
+    obs: "",
+  };
+
+  const [measures, setMeasures] = useState<MeasureEntry[]>(measuresData);
   const [search, setSearch] = useState("");
   const [filterTipo, setFilterTipo] = useState("Todos");
   const [filterActiva, setFilterActiva] = useState("Activas");
-  const [showModal, setShowModal] = useState(false);
+  const [modalMode, setModalMode] = useState<null | "new" | "edit">(null);
+  const [measureForm, setMeasureForm] = useState<Omit<MeasureEntry, "id">>({ ...EMPTY_MEASURE });
+  const [initialMeasureForm, setInitialMeasureForm] = useState<Omit<MeasureEntry, "id">>({ ...EMPTY_MEASURE });
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [dialog, setDialog] = useState<null | {
+    title: string;
+    message: string;
+    variant?: "info" | "danger";
+    confirmLabel?: string;
+    cancelLabel?: string;
+    onConfirm: () => void;
+    onCancel?: () => void;
+  }>(null);
 
   const tipoColors: Record<string, string> = {
     "Alerta Roja": "bg-red-100 text-red-800 dark:bg-red-900/25 dark:text-red-400",
@@ -2480,10 +3352,108 @@ function MeasuresView({ setView }: { setView: (v: View) => void }) {
   };
 
   const tipoIcons: Record<string, any> = {
-    "Alerta Roja": AlertOctagon, "Alerta Migratoria": Globe, "Orden de Arresto": Lock, "Subido a PN": Shield,
+    "Alerta Roja": AlertOctagon,
+    "Alerta Migratoria": Globe,
+    "Orden de Arresto": Lock,
+    "Subido a PN": Shield,
   };
 
-  const toggleMedida = (id: number) => setMeasures(p => p.map(m => m.id === id ? { ...m, activa: !m.activa } : m));
+  const inputCls = "w-full px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground";
+  const labelCls = "block text-xs font-medium text-muted-foreground mb-1 uppercase tracking-wider";
+
+  const openMeasureModal = (mode: "new" | "edit", measure?: MeasureEntry) => {
+    if (mode === "edit" && measure) {
+      const nextForm = {
+        tipo: measure.tipo,
+        imputado: measure.imputado,
+        exp: measure.exp,
+        delito: measure.delito,
+        activadaPor: measure.activadaPor,
+        fecha: measure.fecha,
+        activa: measure.activa,
+        obs: measure.obs,
+      };
+      setMeasureForm(nextForm);
+      setInitialMeasureForm(nextForm);
+      setEditingId(measure.id);
+      setModalMode("edit");
+      return;
+    }
+
+    const currentDate = new Date().toLocaleDateString("es-DO");
+    const nextForm = {
+      ...EMPTY_MEASURE,
+      activadaPor: "arodriguez",
+      fecha: currentDate,
+    };
+    setMeasureForm(nextForm);
+    setInitialMeasureForm(nextForm);
+    setEditingId(null);
+    setModalMode("new");
+  };
+
+  const isMeasureFormDirty = () => JSON.stringify(measureForm) !== JSON.stringify(initialMeasureForm);
+
+  const closeMeasureModal = () => {
+    if (!isMeasureFormDirty()) {
+      setModalMode(null);
+      setEditingId(null);
+      return;
+    }
+
+    setDialog({
+      title: modalMode === "edit" ? "Cancelar edición de medida" : "Cancelar registro de medida",
+      message: modalMode === "edit"
+        ? "Si cancela esta acción, se perderán los cambios realizados en la medida / alerta."
+        : "Si cancela esta acción, se perderán los datos digitados de la medida / alerta.",
+      variant: "danger",
+      confirmLabel: "Sí, cancelar",
+      cancelLabel: "Volver",
+      onConfirm: () => {
+        setDialog(null);
+        setModalMode(null);
+        setEditingId(null);
+      },
+      onCancel: () => setDialog(null),
+    });
+  };
+
+  const saveMeasure = () => {
+    if (!measureForm.exp.trim() || !measureForm.imputado.trim() || !measureForm.delito.trim() || !measureForm.activadaPor.trim()) {
+      setDialog({
+        title: "Datos requeridos",
+        message: "Debe completar expediente, imputado, delito y activada por antes de guardar la medida.",
+        variant: "info",
+        confirmLabel: "Entendido",
+        onConfirm: () => setDialog(null),
+      });
+      return;
+    }
+
+    if (modalMode === "edit" && editingId !== null) {
+      setMeasures(prev => prev.map(m => m.id === editingId ? { ...m, ...measureForm } : m));
+    } else {
+      setMeasures(prev => [...prev, { id: Date.now(), ...measureForm }]);
+    }
+
+    setModalMode(null);
+    setEditingId(null);
+  };
+
+  const confirmDeleteMeasure = (measure: MeasureEntry) => {
+    setDialog({
+      title: "Eliminar medida / alerta",
+      message: `Se eliminará el registro ${measure.tipo} asociado al expediente ${measure.exp}. Esta acción no se puede deshacer.`,
+      variant: "danger",
+      confirmLabel: "Eliminar",
+      cancelLabel: "Volver",
+      onConfirm: () => {
+        setDialog(null);
+        setMeasures(prev => prev.filter(m => m.id !== measure.id));
+      },
+      onCancel: () => setDialog(null),
+    });
+  };
 
   const filtered = useMemo(() => measures.filter(m => {
     if (filterTipo !== "Todos" && m.tipo !== filterTipo) return false;
@@ -2503,10 +3473,9 @@ function MeasuresView({ setView }: { setView: (v: View) => void }) {
       <SectionHeader
         title="Medidas Judiciales y Alertas"
         sub="Control operativo de todas las medidas activas por imputado"
-        action={<Btn icon={Plus} onClick={() => setShowModal(true)}>Registrar Medida</Btn>}
+        action={<Btn icon={Plus} onClick={() => openMeasureModal("new")}>Registrar Medida</Btn>}
       />
 
-      {/* KPI por tipo */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
         {[
           { label: "Alertas Rojas Activas", value: countByType("Alerta Roja"), icon: AlertOctagon, bg: "bg-red-50 dark:bg-red-900/20", fg: "text-red-700 dark:text-red-400" },
@@ -2518,7 +3487,6 @@ function MeasuresView({ setView }: { setView: (v: View) => void }) {
         ))}
       </div>
 
-      {/* Filters */}
       <div className="bg-card border border-border rounded-lg p-4 mb-4">
         <div className="flex flex-wrap gap-3 items-center">
           <div className="relative flex-1 min-w-[180px] max-w-xs">
@@ -2575,12 +3543,8 @@ function MeasuresView({ setView }: { setView: (v: View) => void }) {
                 <span className="text-xs text-muted-foreground max-w-[140px] truncate" title={m.obs}>{m.obs || "—"}</span>,
                 <div className="flex gap-1">
                   <button title="Ver expediente" className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground" onClick={() => setView("case-detail")}><Eye size={13} /></button>
-                  <button title="Editar medida" className="p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 text-muted-foreground hover:text-blue-600"><Edit2 size={13} /></button>
-                  <button title={m.activa ? "Desactivar" : "Reactivar"}
-                    className={`p-1 rounded transition-colors ${m.activa ? "hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 text-muted-foreground" : "hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:text-emerald-600 text-muted-foreground"}`}
-                    onClick={() => toggleMedida(m.id)}>
-                    {m.activa ? <X size={13} /> : <CheckCircle size={13} />}
-                  </button>
+                  <button title="Editar medida" className="p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 text-muted-foreground hover:text-blue-600" onClick={() => openMeasureModal("edit", m)}><Edit2 size={13} /></button>
+                  <button title="Eliminar registro" className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-600" onClick={() => confirmDeleteMeasure(m)}><X size={13} /></button>
                 </div>
               ];
             })}
@@ -2591,42 +3555,34 @@ function MeasuresView({ setView }: { setView: (v: View) => void }) {
         </div>
       </div>
 
-      {/* Mapa operativo por imputado */}
       <div className="mt-6 bg-card border border-border rounded-lg overflow-hidden">
         <div className="px-5 py-4 border-b border-border">
-          <h3 className="font-semibold text-foreground text-sm">Resumen de Medidas por Imputado</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">Vista consolidada de medidas activas por persona</p>
+          <h3 className="font-semibold text-foreground text-sm">Mapa Operativo por Imputado</h3>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-border bg-muted/30">
                 {["Imputado", "Expediente", "Alerta Roja", "Alert. Migratoria", "Orden Arresto", "Subido PN"].map(h => (
-                  <th key={h} className="text-left py-2.5 px-4 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">{h}</th>
+                  <th key={h} className="text-left py-2.5 px-4 font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {[
-                { nombre: "Carlos A. Méndez Ríos", exp: "EXP-2024-1847", roja: true, mig: true, arresto: true, pn: true },
-                { nombre: "INVERSALUD S.A.", exp: "EXP-2024-1846", roja: false, mig: true, arresto: true, pn: false },
-                { nombre: "José M. Paulino Marte", exp: "EXP-2024-1844", roja: true, mig: true, arresto: true, pn: false },
-                { nombre: "Wilkins B. Castillo Luna", exp: "EXP-2024-1843", roja: false, mig: false, arresto: true, pn: true },
-                { nombre: "Constructora REYMA S.R.L.", exp: "EXP-2024-1841", roja: false, mig: false, arresto: false, pn: false },
-              ].map((row, i) => {
-                const Chk = ({ v }: { v: boolean }) => (
-                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-medium ${v ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/25 dark:text-emerald-400" : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-500"}`}>
-                    {v ? <CheckCircle size={9} /> : <X size={9} />}{v ? "Sí" : "No"}
-                  </span>
-                );
+              {Array.from(new Map(filtered.map(m => [m.imputado + m.exp, m])).values()).map((row, i) => {
+                const related = measures.filter(m => m.imputado === row.imputado && m.exp === row.exp && m.activa);
+                const has = (tipo: string) => related.some(x => x.tipo === tipo);
+                const Chk = ({ v }: { v: boolean }) => v
+                  ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-900/25 dark:text-emerald-400 font-mono"><CheckCircle size={10} />Sí</span>
+                  : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-500 font-mono"><X size={10} />No</span>;
                 return (
                   <tr key={i} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                    <td className="py-2.5 px-4 font-medium text-foreground text-sm">{row.nombre}</td>
+                    <td className="py-2.5 px-4 font-medium text-foreground text-sm">{row.imputado}</td>
                     <td className="py-2.5 px-4 font-mono text-xs text-primary cursor-pointer hover:underline" onClick={() => setView("case-detail")}>{row.exp}</td>
-                    <td className="py-2.5 px-4"><Chk v={row.roja} /></td>
-                    <td className="py-2.5 px-4"><Chk v={row.mig} /></td>
-                    <td className="py-2.5 px-4"><Chk v={row.arresto} /></td>
-                    <td className="py-2.5 px-4"><Chk v={row.pn} /></td>
+                    <td className="py-2.5 px-4"><Chk v={has("Alerta Roja")} /></td>
+                    <td className="py-2.5 px-4"><Chk v={has("Alerta Migratoria")} /></td>
+                    <td className="py-2.5 px-4"><Chk v={has("Orden de Arresto")} /></td>
+                    <td className="py-2.5 px-4"><Chk v={has("Subido a PN")} /></td>
                   </tr>
                 );
               })}
@@ -2635,43 +3591,70 @@ function MeasuresView({ setView }: { setView: (v: View) => void }) {
         </div>
       </div>
 
-      {/* Modal registrar medida */}
-      {showModal && (
+      <ActionDialog
+        open={dialog !== null}
+        title={dialog?.title ?? ""}
+        message={dialog?.message ?? ""}
+        variant={dialog?.variant ?? "info"}
+        confirmLabel={dialog?.confirmLabel ?? "Aceptar"}
+        cancelLabel={dialog?.cancelLabel}
+        onConfirm={dialog?.onConfirm ?? (() => setDialog(null))}
+        onCancel={dialog?.onCancel}
+      />
+
+      {modalMode !== null && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-lg">
             <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-              <h2 className="font-semibold text-foreground">Registrar Medida / Alerta</h2>
-              <button onClick={() => setShowModal(false)}><X size={16} className="text-muted-foreground" /></button>
+              <h2 className="font-semibold text-foreground">{modalMode === "edit" ? "Editar Medida / Alerta" : "Registrar Medida / Alerta"}</h2>
+              <button onClick={closeMeasureModal}><X size={16} className="text-muted-foreground" /></button>
             </div>
             <div className="p-6 space-y-4">
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1 uppercase tracking-wider">Expediente<span className="text-red-500">*</span></label>
-                <input className="w-full px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground" placeholder="Ej. EXP-2024-1847" />
+                <label className={labelCls}>Expediente<span className="text-red-500">*</span></label>
+                <input value={measureForm.exp} onChange={e => setMeasureForm(p => ({ ...p, exp: e.target.value }))} className={inputCls} placeholder="Ej. EXP-2024-1847" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1 uppercase tracking-wider">Imputado<span className="text-red-500">*</span></label>
-                <select className="w-full px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground">
-                  <option>Seleccionar imputado del expediente…</option>
-                  <option>Carlos A. Méndez Ríos</option>
-                </select>
+                <label className={labelCls}>Imputado<span className="text-red-500">*</span></label>
+                <input value={measureForm.imputado} onChange={e => setMeasureForm(p => ({ ...p, imputado: e.target.value }))} className={inputCls} placeholder="Nombre del imputado" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className={labelCls}>Tipo de Medida<span className="text-red-500">*</span></label>
+                  <select value={measureForm.tipo} onChange={e => setMeasureForm(p => ({ ...p, tipo: e.target.value }))} className={inputCls}>
+                    {["Alerta Roja", "Alerta Migratoria", "Orden de Arresto", "Subido a PN"].map(x => <option key={x}>{x}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Estado</label>
+                  <select value={measureForm.activa ? "Activa" : "Inactiva"} onChange={e => setMeasureForm(p => ({ ...p, activa: e.target.value === "Activa" }))} className={inputCls}>
+                    <option>Activa</option>
+                    <option>Inactiva</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className={labelCls}>Delito<span className="text-red-500">*</span></label>
+                  <input value={measureForm.delito} onChange={e => setMeasureForm(p => ({ ...p, delito: e.target.value }))} className={inputCls} placeholder="Delito asociado" />
+                </div>
+                <div>
+                  <label className={labelCls}>Activada por<span className="text-red-500">*</span></label>
+                  <input value={measureForm.activadaPor} onChange={e => setMeasureForm(p => ({ ...p, activadaPor: e.target.value }))} className={inputCls} placeholder="Usuario responsable" />
+                </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1 uppercase tracking-wider">Tipo de Medida<span className="text-red-500">*</span></label>
-                <select className="w-full px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground">
-                  <option>Alerta Roja</option>
-                  <option>Alerta Migratoria</option>
-                  <option>Orden de Arresto</option>
-                  <option>Subido a Policía Nacional</option>
-                </select>
+                <label className={labelCls}>Fecha</label>
+                <input value={measureForm.fecha} onChange={e => setMeasureForm(p => ({ ...p, fecha: e.target.value }))} className={inputCls} placeholder="dd/mm/yyyy" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1 uppercase tracking-wider">Observación</label>
-                <textarea rows={3} className="w-full px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground resize-none" placeholder="Detalles de la medida…" />
+                <label className={labelCls}>Observación</label>
+                <textarea rows={3} value={measureForm.obs} onChange={e => setMeasureForm(p => ({ ...p, obs: e.target.value }))} className={`${inputCls} resize-none`} placeholder="Detalles de la medida…" />
               </div>
             </div>
             <div className="flex gap-2 justify-end px-6 pb-5">
-              <Btn variant="secondary" onClick={() => setShowModal(false)}>Cancelar</Btn>
-              <Btn icon={CheckCircle} onClick={() => setShowModal(false)}>Activar Medida</Btn>
+              <Btn variant="secondary" onClick={closeMeasureModal}>Cancelar</Btn>
+              <Btn icon={CheckCircle} onClick={saveMeasure}>{modalMode === "edit" ? "Guardar Cambios" : "Activar Medida"}</Btn>
             </div>
           </div>
         </div>
@@ -2969,36 +3952,205 @@ function ReportsView() {
 // ─── Settings View ────────────────────────────────────────────────────────────
 
 function SettingsView({ dark, setDark }: { dark: boolean; setDark: (b: boolean) => void }) {
+  const DEFAULT_SETTINGS = {
+    sessionTimeout: "30",
+    maxLoginAttempts: "5",
+    mfaRole: "Administrador y Supervisor",
+    maxFileSize: "20 MB",
+    allowedTypes: "PDF, DOCX, XLSX, JPG, PNG",
+    systemName: "UCAPREC",
+    institution: "Ministerio Público",
+  };
+
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [dialog, setDialog] = useState<null | {
+    title: string;
+    message: string;
+    variant?: "info" | "danger";
+    confirmLabel?: string;
+    cancelLabel?: string;
+    onConfirm: () => void;
+    onCancel?: () => void;
+  }>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("ucaprec_settings");
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      setSettings(prev => ({ ...prev, ...parsed }));
+      if (typeof parsed.darkMode === "boolean") setDark(parsed.darkMode);
+    } catch {
+      // Ignorar configuración corrupta y conservar valores por defecto
+    }
+  }, [setDark]);
+
+  const updateSetting = (key: keyof typeof settings, value: string) => {
+    setSettings(prev => ({ ...prev, [key]: value }));
+  };
+
+  const handleSaveSettings = () => {
+    try {
+      localStorage.setItem("ucaprec_settings", JSON.stringify({
+        ...settings,
+        darkMode: dark,
+      }));
+
+      setDialog({
+        title: "Configuración guardada",
+        message: "Los parámetros del sistema fueron guardados correctamente.",
+        variant: "info",
+        confirmLabel: "Aceptar",
+        onConfirm: () => setDialog(null),
+      });
+    } catch {
+      setDialog({
+        title: "No se pudo guardar",
+        message: "Ocurrió un problema al guardar la configuración. Intente nuevamente.",
+        variant: "danger",
+        confirmLabel: "Aceptar",
+        onConfirm: () => setDialog(null),
+      });
+    }
+  };
+
+  const handleResetDefaults = () => {
+    setDialog({
+      title: "Restablecer configuración",
+      message: "Se restaurarán los valores por defecto del sistema. Esta acción sobrescribirá la configuración actual.",
+      variant: "danger",
+      confirmLabel: "Sí, restablecer",
+      cancelLabel: "Volver",
+      onConfirm: () => {
+        setDialog(null);
+        setSettings(DEFAULT_SETTINGS);
+        setDark(false);
+        localStorage.removeItem("ucaprec_settings");
+      },
+      onCancel: () => setDialog(null),
+    });
+  };
+
   return (
     <div className="p-6">
       <SectionHeader title="Configuración del Sistema" sub="Parámetros globales y preferencias de la aplicación" />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {[
           {
             title: "Apariencia", icon: Sun, items: [
-              { label: "Tema de la interfaz", comp: <div className="flex gap-2">
-                <button onClick={() => setDark(false)} className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${!dark ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-muted"}`}>Claro</button>
-                <button onClick={() => setDark(true)} className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${dark ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-muted"}`}>Oscuro</button>
-              </div>}
+              {
+                label: "Tema de la interfaz",
+                comp: (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setDark(false)}
+                      className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${!dark ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+                    >
+                      Claro
+                    </button>
+                    <button
+                      onClick={() => setDark(true)}
+                      className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${dark ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+                    >
+                      Oscuro
+                    </button>
+                  </div>
+                )
+              }
             ]
           },
           {
             title: "Seguridad", icon: Lock, items: [
-              { label: "Tiempo de sesión (minutos)", comp: <input type="number" defaultValue="30" className="w-24 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground" /> },
-              { label: "Intentos máximos de login", comp: <input type="number" defaultValue="5" className="w-24 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground" /> },
-              { label: "MFA obligatorio por rol", comp: <select className="text-sm bg-input-background border border-border rounded-md px-2 py-1.5 outline-none text-foreground"><option>Administrador y Supervisor</option></select> },
+              {
+                label: "Tiempo de sesión (minutos)",
+                comp: (
+                  <input
+                    type="number"
+                    value={settings.sessionTimeout}
+                    onChange={e => updateSetting("sessionTimeout", e.target.value)}
+                    className="w-24 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground"
+                  />
+                )
+              },
+              {
+                label: "Intentos máximos de login",
+                comp: (
+                  <input
+                    type="number"
+                    value={settings.maxLoginAttempts}
+                    onChange={e => updateSetting("maxLoginAttempts", e.target.value)}
+                    className="w-24 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground"
+                  />
+                )
+              },
+              {
+                label: "MFA obligatorio por rol",
+                comp: (
+                  <select
+                    value={settings.mfaRole}
+                    onChange={e => updateSetting("mfaRole", e.target.value)}
+                    className="text-sm bg-input-background border border-border rounded-md px-2 py-1.5 outline-none text-foreground"
+                  >
+                    <option>Administrador y Supervisor</option>
+                    <option>Solo Administrador</option>
+                    <option>Todos los roles</option>
+                    <option>No requerido</option>
+                  </select>
+                )
+              },
             ]
           },
           {
             title: "Archivos Adjuntos", icon: FileText, items: [
-              { label: "Tamaño máximo por archivo", comp: <select className="text-sm bg-input-background border border-border rounded-md px-2 py-1.5 outline-none text-foreground"><option>20 MB</option><option>10 MB</option><option>50 MB</option></select> },
-              { label: "Tipos permitidos", comp: <input defaultValue="PDF, DOCX, XLSX, JPG, PNG" className="w-64 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground" /> },
+              {
+                label: "Tamaño máximo por archivo",
+                comp: (
+                  <select
+                    value={settings.maxFileSize}
+                    onChange={e => updateSetting("maxFileSize", e.target.value)}
+                    className="text-sm bg-input-background border border-border rounded-md px-2 py-1.5 outline-none text-foreground"
+                  >
+                    <option>20 MB</option>
+                    <option>10 MB</option>
+                    <option>50 MB</option>
+                  </select>
+                )
+              },
+              {
+                label: "Tipos permitidos",
+                comp: (
+                  <input
+                    value={settings.allowedTypes}
+                    onChange={e => updateSetting("allowedTypes", e.target.value)}
+                    className="w-64 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground"
+                  />
+                )
+              },
             ]
           },
           {
             title: "Sistema", icon: Database, items: [
-              { label: "Nombre del sistema", comp: <input defaultValue="UCAPREC" className="w-40 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground" /> },
-              { label: "Institución", comp: <input defaultValue="Ministerio Público" className="w-64 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground" /> },
+              {
+                label: "Nombre del sistema",
+                comp: (
+                  <input
+                    value={settings.systemName}
+                    onChange={e => updateSetting("systemName", e.target.value)}
+                    className="w-40 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground"
+                  />
+                )
+              },
+              {
+                label: "Institución",
+                comp: (
+                  <input
+                    value={settings.institution}
+                    onChange={e => updateSetting("institution", e.target.value)}
+                    className="w-64 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground"
+                  />
+                )
+              },
               { label: "Versión del sistema", comp: <span className="font-mono text-xs text-muted-foreground">v1.0.0-beta</span> },
             ]
           },
@@ -3010,7 +4162,7 @@ function SettingsView({ dark, setDark }: { dark: boolean; setDark: (b: boolean) 
             </div>
             <div className="p-5 space-y-4">
               {items.map(({ label, comp }) => (
-                <div key={label} className="flex items-center justify-between">
+                <div key={label} className="flex items-center justify-between gap-4">
                   <label className="text-sm text-foreground">{label}</label>
                   {comp}
                 </div>
@@ -3019,10 +4171,22 @@ function SettingsView({ dark, setDark }: { dark: boolean; setDark: (b: boolean) 
           </div>
         ))}
       </div>
+
       <div className="mt-6 flex justify-end gap-2">
-        <Btn variant="secondary">Restablecer valores por defecto</Btn>
-        <Btn icon={CheckCircle}>Guardar Configuración</Btn>
+        <Btn variant="secondary" onClick={handleResetDefaults}>Restablecer valores por defecto</Btn>
+        <Btn icon={CheckCircle} onClick={handleSaveSettings}>Guardar Configuración</Btn>
       </div>
+
+      <ActionDialog
+        open={dialog !== null}
+        title={dialog?.title ?? ""}
+        message={dialog?.message ?? ""}
+        variant={dialog?.variant ?? "info"}
+        confirmLabel={dialog?.confirmLabel ?? "Aceptar"}
+        cancelLabel={dialog?.cancelLabel}
+        onConfirm={dialog?.onConfirm ?? (() => setDialog(null))}
+        onCancel={dialog?.onCancel}
+      />
     </div>
   );
 }
@@ -3219,9 +4383,9 @@ function CatalogsView() {
 
 const VIEW_TITLES: Record<View, string> = {
   dashboard: "Dashboard", cases: "Expedientes", "case-detail": "Detalle del Expediente",
-  "case-form": "Editar Expediente", defendants: "Imputados", victims: "Víctimas",
+  "case-form": "Editar Expediente", "case-new": "Nuevo Expediente", defendants: "Imputados", victims: "Víctimas",
   measures: "Medidas y Alertas", documents: "Documentos", reports: "Reportes",
-  analytics: "Analítica", users: "Usuarios y Roles", audit: "Auditoría",
+  analytics: "Analítica", notifications: "Notificaciones", users: "Usuarios y Roles", audit: "Auditoría",
   catalogs: "Catálogos", settings: "Configuración",
 };
 
@@ -3231,6 +4395,10 @@ export default function App() {
   const [view, setView] = useState<View>("dashboard");
   const [dark, setDark] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [caseFormStartTab, setCaseFormStartTab] = useState(0);
+  const [autoOpenAddDefModal, setAutoOpenAddDefModal] = useState(false);
+  const [selectedDefendantCaseId, setSelectedDefendantCaseId] = useState("");
+  const [selectedNotificationCaseId, setSelectedNotificationCaseId] = useState("");
 
   // ── Navigation history ──
   const [navHist, setNavHist] = useState<View[]>(["dashboard"]);
@@ -3267,16 +4435,47 @@ export default function App() {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
 
+  const openAddImputadoFromDefendants = useCallback((caseId: string) => {
+    setSelectedNotificationCaseId("");
+    setSelectedDefendantCaseId(caseId);
+    setCaseFormStartTab(1);
+    setAutoOpenAddDefModal(true);
+    navigate("case-form");
+  }, [navigate]);
+
+  const openCaseFromNotification = useCallback((caseId: string) => {
+    setSelectedDefendantCaseId("");
+    setSelectedNotificationCaseId(caseId);
+    setCaseFormStartTab(0);
+    setAutoOpenAddDefModal(false);
+    navigate("case-form");
+  }, [navigate]);
+
+  const openNotificationsCenter = useCallback(() => {
+    navigate("notifications");
+  }, [navigate]);
+
   const renderView = () => {
     switch (view) {
       case "dashboard": return <DashboardView setView={navigate} />;
       case "cases": return <CasesView setView={navigate} />;
       case "case-detail": return <CaseDetailView setView={navigate} mode="detail" />;
-      case "case-form": return <CaseDetailView setView={navigate} mode="form" />;
-      case "defendants": return <DefendantsView setView={navigate} />;
+      case "case-form": return (
+        <CaseDetailView
+          setView={navigate}
+          mode="form"
+          initialTab={caseFormStartTab}
+          autoOpenAddDefModal={autoOpenAddDefModal}
+          selectedCaseId={selectedNotificationCaseId || selectedDefendantCaseId}
+          onConsumedAutoOpenAddDefModal={() => setAutoOpenAddDefModal(false)}
+        />
+      );
+      case "case-new": return <NewCaseView setView={navigate} />;
+      case "defendants": return <DefendantsView setView={navigate} openAddImputado={openAddImputadoFromDefendants} />;
       case "victims": return <VictimsView setView={navigate} />;
       case "measures": return <MeasuresView setView={navigate} />;
       case "documents": return <DocumentsView setView={navigate} />;
+      case "notifications": return <NotificationsView openCaseFromNotification={openCaseFromNotification} />;
       case "reports": return <ReportsView />;
       case "analytics": return <AnalyticsView />;
       case "users": return <UsersView />;
@@ -3296,9 +4495,12 @@ export default function App() {
           dark={dark}
           setDark={setDark}
           setView={navigate}
+          navigateModule={navigateModule}
           goBack={goBack}
           canGoBack={canGoBack}
           breadcrumb={breadcrumb}
+          openCaseFromNotification={openCaseFromNotification}
+          openNotificationsCenter={openNotificationsCenter}
         />
         <main className="flex-1 overflow-y-auto">
           {renderView()}
