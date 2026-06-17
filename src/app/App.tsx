@@ -27,7 +27,7 @@ import mpLogo from "../imports/Logo_-_Ministerio_Publico_-_Horizontal.png";
 type View =
   | "dashboard" | "cases" | "case-detail" | "case-form" | "case-new"
   | "defendants" | "victims" | "measures" | "documents"
-  | "reports" | "analytics" | "users" | "audit" | "catalogs" | "settings";
+  | "reports" | "analytics" | "notifications" | "users" | "audit" | "catalogs" | "settings";
 
 interface NavItem { id: View; label: string; icon: any; badge?: number }
 interface NavGroup { label: string; items: NavItem[] }
@@ -134,11 +134,11 @@ const auditData = [
 ];
 
 const systemAlerts = [
-  { type: "danger", msg: "Alerta roja activada — EXP-2024-1847: Carlos Méndez Ríos (Lavado de Activos)", time: "hace 2h" },
-  { type: "warning", msg: "Alerta migratoria actualizada — EXP-2024-1846: INVERSALUD S.A.", time: "hace 5h" },
-  { type: "info", msg: "EXP-2024-1839 asignado a Ana Rodríguez por supervisor", time: "hace 8h" },
-  { type: "success", msg: "Documento Sentencia_0881.pdf subido correctamente en EXP-2024-1844", time: "hace 10h" },
-  { type: "warning", msg: "EXP-2024-1821 pendiente de verificación — 14 días sin actualizar", time: "hace 1d" },
+  { id: 1, type: "danger", msg: "Alerta roja activada — EXP-2024-1847: Carlos Méndez Ríos (Lavado de Activos)", time: "hace 2h", exp: "EXP-2024-1847", action: "open-case" },
+  { id: 2, type: "warning", msg: "Alerta migratoria actualizada — EXP-2024-1846: INVERSALUD S.A.", time: "hace 5h", exp: "EXP-2024-1846", action: "open-case" },
+  { id: 3, type: "info", msg: "EXP-2024-1839 asignado a Ana Rodríguez por supervisor", time: "hace 8h", exp: "EXP-2024-1839", action: "open-case" },
+  { id: 4, type: "success", msg: "Documento Sentencia_0881.pdf subido correctamente en EXP-2024-1844", time: "hace 10h", exp: "EXP-2024-1844", action: "open-case" },
+  { id: 5, type: "warning", msg: "EXP-2024-1821 pendiente de verificación — 14 días sin actualizar", time: "hace 1d", exp: "EXP-2024-1821", action: "open-case" },
 ];
 
 // ─── Export / Print utilities ────────────────────────────────────────────────
@@ -507,9 +507,21 @@ function Sidebar({ view, setView, navigateModule, collapsed, setCollapsed }: {
 
 // ─── TopBar ───────────────────────────────────────────────────────────────────
 
-function TopBar({ title, dark, setDark, setView, navigateModule, goBack, canGoBack, breadcrumb }: {
+function TopBar({
+  title,
+  dark,
+  setDark,
+  setView,
+  navigateModule,
+  goBack,
+  canGoBack,
+  breadcrumb,
+  openCaseFromNotification,
+  openNotificationsCenter,
+}: {
   title: string; dark: boolean; setDark: (b: boolean) => void; setView: (v: View) => void;
   navigateModule: (v: View) => void; goBack: () => void; canGoBack: boolean; breadcrumb: View[];
+  openCaseFromNotification: (caseId: string) => void; openNotificationsCenter: () => void;
 }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
@@ -575,23 +587,42 @@ function TopBar({ title, dark, setDark, setView, navigateModule, goBack, canGoBa
                 <button onClick={() => setNotifOpen(false)}><X size={14} className="text-muted-foreground" /></button>
               </div>
               <div className="divide-y divide-border max-h-72 overflow-y-auto">
-                {systemAlerts.map((a, i) => {
+                {systemAlerts.map((a) => {
                   const colors = { danger: "text-red-600", warning: "text-amber-600", info: "text-blue-600", success: "text-emerald-600" };
                   const icons = { danger: AlertOctagon, warning: AlertTriangle, info: Info, success: CheckCircle };
                   const Icon = icons[a.type as keyof typeof icons];
                   return (
-                    <div key={i} className="flex gap-3 px-4 py-3 hover:bg-muted/40 cursor-pointer">
+                    <button
+                      key={a.id}
+                      onClick={() => {
+                        setNotifOpen(false);
+                        if (a.exp) {
+                          openCaseFromNotification(a.exp);
+                          return;
+                        }
+                        openNotificationsCenter();
+                      }}
+                      className="w-full flex gap-3 px-4 py-3 hover:bg-muted/40 transition-colors text-left"
+                    >
                       <Icon size={14} className={`mt-0.5 flex-shrink-0 ${colors[a.type as keyof typeof colors]}`} />
                       <div>
                         <p className="text-xs text-foreground leading-snug">{a.msg}</p>
                         <p className="text-[10px] text-muted-foreground mt-1 font-mono">{a.time}</p>
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
               <div className="px-4 py-2 border-t border-border">
-                <button className="text-xs text-primary hover:underline w-full text-center">Ver todas las notificaciones</button>
+                <button
+                  onClick={() => {
+                    setNotifOpen(false);
+                    openNotificationsCenter();
+                  }}
+                  className="text-xs text-primary hover:underline w-full text-center"
+                >
+                  Ver todas las notificaciones
+                </button>
               </div>
             </div>
           )}
@@ -646,6 +677,101 @@ function TopBar({ title, dark, setDark, setView, navigateModule, goBack, canGoBa
         </div>
       </div>
     </header>
+  );
+}
+
+// ─── Notifications View ──────────────────────────────────────────────────────
+function NotificationsView({ openCaseFromNotification }: { openCaseFromNotification: (caseId: string) => void }) {
+  const [filterType, setFilterType] = useState("Todas");
+
+  const filtered = systemAlerts.filter(a => filterType === "Todas" || a.type === filterType);
+
+  const colors = {
+    danger: "text-red-600",
+    warning: "text-amber-600",
+    info: "text-blue-600",
+    success: "text-emerald-600",
+  };
+  const badges = {
+    danger: "bg-red-100 text-red-800 dark:bg-red-900/25 dark:text-red-400",
+    warning: "bg-amber-100 text-amber-800 dark:bg-amber-900/25 dark:text-amber-400",
+    info: "bg-blue-100 text-blue-800 dark:bg-blue-900/25 dark:text-blue-400",
+    success: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/25 dark:text-emerald-400",
+  };
+  const icons = {
+    danger: AlertOctagon,
+    warning: AlertTriangle,
+    info: Info,
+    success: CheckCircle,
+  };
+  const labels = {
+    danger: "Crítica",
+    warning: "Atención",
+    info: "Informativa",
+    success: "Completada",
+  };
+
+  return (
+    <div className="p-6">
+      <SectionHeader
+        title="Centro de Notificaciones"
+        sub="Historial de alertas operativas y acceso rápido para editar expedientes relacionados"
+      />
+
+      <div className="bg-card border border-border rounded-lg p-4 mb-4 flex flex-wrap gap-2 items-center">
+        {[
+          ["Todas", "Todas"],
+          ["danger", "Críticas"],
+          ["warning", "Atención"],
+          ["info", "Informativas"],
+          ["success", "Completadas"],
+        ].map(([value, label]) => (
+          <button
+            key={value}
+            onClick={() => setFilterType(value)}
+            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${filterType === value ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+          >
+            {label}
+          </button>
+        ))}
+        <span className="ml-auto text-xs text-muted-foreground font-mono">{filtered.length} notificación(es)</span>
+      </div>
+
+      <div className="bg-card border border-border rounded-lg overflow-hidden">
+        {filtered.length === 0 ? (
+          <div className="py-12 flex flex-col items-center gap-3 text-muted-foreground">
+            <Bell size={30} className="opacity-30" />
+            <p className="text-sm">No hay notificaciones para el filtro seleccionado.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {filtered.map(alert => {
+              const Icon = icons[alert.type as keyof typeof icons];
+              return (
+                <button
+                  key={alert.id}
+                  onClick={() => alert.exp && openCaseFromNotification(alert.exp)}
+                  className="w-full flex items-start gap-4 px-5 py-4 hover:bg-muted/30 transition-colors text-left"
+                >
+                  <Icon size={18} className={`mt-0.5 flex-shrink-0 ${colors[alert.type as keyof typeof colors]}`} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${badges[alert.type as keyof typeof badges]}`}>
+                        {labels[alert.type as keyof typeof labels]}
+                      </span>
+                      {alert.exp && <span className="text-[11px] font-mono text-primary">{alert.exp}</span>}
+                      <span className="text-[11px] text-muted-foreground font-mono ml-auto">{alert.time}</span>
+                    </div>
+                    <p className="text-sm text-foreground leading-relaxed">{alert.msg}</p>
+                    {alert.exp && <p className="text-xs text-primary mt-2">Abrir expediente para edición</p>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -733,6 +859,7 @@ function exportDashboardPDF() {
 }
 
 function DashboardView({ setView }: { setView: (v: View) => void }) {
+  const totalImputados = defendants.length;
   return (
     <div className="p-6 space-y-6">
       <SectionHeader
@@ -747,9 +874,11 @@ function DashboardView({ setView }: { setView: (v: View) => void }) {
       />
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <KPICard label="Expedientes Totales" value={KPI.total} delta="+47 este mes"
           icon={FolderOpen} bg="bg-blue-50 dark:bg-blue-900/20" fg="text-blue-700 dark:text-blue-400" sub="Desde 1990 a la fecha" />
+        <KPICard label="Imputados Totales" value={totalImputados}
+          icon={Users} bg="bg-sky-50 dark:bg-sky-900/20" fg="text-sky-700 dark:text-sky-400" sub="Registros cargados actualmente" />
         <KPICard label="Prófugos Activos" value={KPI.profugos} delta="+8 este mes"
           icon={UserX} bg="bg-red-50 dark:bg-red-900/20" fg="text-red-700 dark:text-red-400" />
         <KPICard label="En Rebeldía" value={KPI.rebeldes} delta="-3 este mes"
@@ -935,6 +1064,7 @@ function DashboardView({ setView }: { setView: (v: View) => void }) {
 
 function CasesView({ setView }: { setView: (v: View) => void }) {
   const [search, setSearch] = useState("");
+  const [filterRecordStatus, setFilterRecordStatus] = useState("Todos");
   const [filterStatus, setFilterStatus] = useState("Todos");
   const [filterTipo, setFilterTipo] = useState("Todos");
   const [filterDelito, setFilterDelito] = useState("Todos");
@@ -947,6 +1077,8 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return cases.filter(c => {
+      if (filterRecordStatus === "Requieren atención" && c.estReg !== "En Revisión") return false;
+      if (filterRecordStatus !== "Todos" && filterRecordStatus !== "Requieren atención" && c.estReg !== filterRecordStatus) return false;
       if (filterStatus !== "Todos" && c.estatus !== filterStatus) return false;
       if (filterTipo !== "Todos" && c.tipo !== filterTipo) return false;
       if (filterDelito !== "Todos" && c.delito !== filterDelito) return false;
@@ -963,11 +1095,29 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
           !c.delito.toLowerCase().includes(q) && !c.sentencia.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [cases, search, filterStatus, filterTipo, filterDelito, filterAnalista, filterDesde, filterHasta]);
+  }, [cases, search, filterRecordStatus, filterStatus, filterTipo, filterDelito, filterAnalista, filterDesde, filterHasta]);
+
+  const reviewCount = cases.filter(c => c.estReg === "En Revisión").length;
+  const verifiedCount = cases.filter(c => c.estReg === "Verificado").length;
+  const attentionCount = cases.filter(c => c.estReg === "En Revisión").length;
 
   const confirmDelete = (id: string) => setDeleteId(id);
   const doDelete = () => {
-    if (deleteId) { setCases(prev => prev.filter(c => c.id !== deleteId)); setDeleteId(null); }
+    if (deleteId) {
+      setCases(prev => prev.filter(c => c.id !== deleteId));
+      setDeleteId(null);
+    }
+  };
+
+  const clearFilters = () => {
+    setSearch("");
+    setFilterRecordStatus("Todos");
+    setFilterStatus("Todos");
+    setFilterTipo("Todos");
+    setFilterDelito("Todos");
+    setFilterAnalista("Todos");
+    setFilterDesde("");
+    setFilterHasta("");
   };
 
   const selectCls = "text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none focus:ring-1 focus:ring-ring";
@@ -979,6 +1129,45 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
         sub={`${filtered.length} de ${cases.length} expedientes mostrados`}
         action={<Btn icon={Plus} onClick={() => setView("case-new")}>Nuevo Expediente</Btn>}
       />
+
+      {/* Resumen de estatus de registro */}
+<div className="flex gap-2.5 mb-4 overflow-x-auto pb-1">
+  <button
+    onClick={() => setFilterRecordStatus("Todos")}
+    className={`min-w-[200px] flex-1 text-left bg-card border rounded-lg p-3 transition-colors ${filterRecordStatus === "Todos" ? "border-primary ring-1 ring-primary/20" : "border-border hover:bg-muted/20"}`}
+  >
+    <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Total</div>
+    <div className="text-xl font-bold font-mono text-foreground mt-1">{cases.length}</div>
+    <div className="text-[11px] text-muted-foreground mt-1">Expedientes registrados</div>
+  </button>
+
+  <button
+    onClick={() => setFilterRecordStatus("En Revisión")}
+    className={`min-w-[200px] flex-1 text-left bg-card border rounded-lg p-3 transition-colors ${filterRecordStatus === "En Revisión" ? "border-orange-500 ring-1 ring-orange-500/20 bg-orange-50/60 dark:bg-orange-900/10" : "border-border hover:bg-muted/20"}`}
+  >
+    <div className="text-[10px] text-muted-foreground uppercase tracking-wider">En Revisión</div>
+    <div className="text-xl font-bold font-mono text-orange-600 dark:text-orange-400 mt-1">{reviewCount}</div>
+    <div className="text-[11px] text-muted-foreground mt-1">Pendientes de cierre documental</div>
+  </button>
+
+  <button
+    onClick={() => setFilterRecordStatus("Verificado")}
+    className={`min-w-[200px] flex-1 text-left bg-card border rounded-lg p-3 transition-colors ${filterRecordStatus === "Verificado" ? "border-blue-500 ring-1 ring-blue-500/20 bg-blue-50/60 dark:bg-blue-900/10" : "border-border hover:bg-muted/20"}`}
+  >
+    <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Verificado</div>
+    <div className="text-xl font-bold font-mono text-blue-600 dark:text-blue-400 mt-1">{verifiedCount}</div>
+    <div className="text-[11px] text-muted-foreground mt-1">Completamente revisados</div>
+  </button>
+
+  <button
+    onClick={() => setFilterRecordStatus("Requieren atención")}
+    className={`min-w-[220px] flex-1 text-left bg-card border rounded-lg p-3 transition-colors ${filterRecordStatus === "Requieren atención" ? "border-amber-500 ring-1 ring-amber-500/20 bg-amber-50/60 dark:bg-amber-900/10" : "border-border hover:bg-muted/20"}`}
+  >
+    <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Requieren atención</div>
+    <div className="text-xl font-bold font-mono text-amber-600 dark:text-amber-400 mt-1">{attentionCount}</div>
+    <div className="text-[11px] text-muted-foreground mt-1">Casos activos que deben revisarse</div>
+  </button>
+</div>
 
       {/* Filters */}
       <div className="bg-card border border-border rounded-lg p-4 mb-4">
@@ -993,15 +1182,20 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
               placeholder="Buscar por No. sentencia, imputado, delito…"
             />
           </div>
-          {/* Status chips */}
+
+          {/* Estado de registro chips */}
           <div className="flex gap-1.5 flex-wrap">
-            {["Todos", "Prófugo", "Rebeldía", "Recluido", "Absuelto"].map(s => (
-              <button key={s} onClick={() => setFilterStatus(s)}
-                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${filterStatus === s ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-muted"}`}>
+            {["Todos", "En Revisión", "Verificado"].map(s => (
+              <button
+                key={s}
+                onClick={() => setFilterRecordStatus(s)}
+                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${filterRecordStatus === s ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+              >
                 {s}
               </button>
             ))}
           </div>
+
           <div className="flex gap-2 ml-auto">
             <Btn variant="secondary" icon={Download} size="sm" onClick={() => downloadCSV(
               ["Expediente", "No. Sentencia", "Imputado", "Delito", "Estatus", "Alerta", "Estado Reg.", "Asignado", "Fecha"],
@@ -1014,6 +1208,22 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
 
         {/* Advanced filters */}
         <div className="flex flex-wrap gap-3 mt-3 pt-3 border-t border-border items-end">
+  <div className="flex flex-col gap-0.5">
+  <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Estatus del Imputado</label>
+  <select
+    value={filterStatus}
+    onChange={e => setFilterStatus(e.target.value)}
+    className={`${selectCls} min-w-[170px]`}
+  >
+    <option value="Todos">Todos</option>
+    <option value="Prófugo">Prófugo</option>
+    <option value="Rebeldía">Rebeldía</option>
+    <option value="Recluido">Recluido</option>
+    <option value="Absuelto">Absuelto</option>
+  </select>
+</div>
+
+
           <div className="flex flex-col gap-0.5">
             <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Tipo de Expediente</label>
             <select value={filterTipo} onChange={e => setFilterTipo(e.target.value)} className={`${selectCls} min-w-[150px]`}>
@@ -1021,6 +1231,7 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
               {TIPOS_EXPEDIENTE.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
+
           <div className="flex flex-col gap-0.5">
             <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Delito Principal</label>
             <select value={filterDelito} onChange={e => setFilterDelito(e.target.value)} className={`${selectCls} min-w-[180px]`}>
@@ -1028,6 +1239,7 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
               {INFRACCIONES.map(inf => <option key={inf} value={inf}>{inf}</option>)}
             </select>
           </div>
+
           <div className="flex flex-col gap-0.5">
             <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Analista</label>
             <select value={filterAnalista} onChange={e => setFilterAnalista(e.target.value)} className={`${selectCls} min-w-[140px]`}>
@@ -1035,18 +1247,19 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
               {["Ana Rodríguez", "Luis Peña", "María Santos", "Pedro Álvarez"].map(a => <option key={a} value={a}>{a}</option>)}
             </select>
           </div>
+
           <div className="flex flex-col gap-0.5">
             <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Fecha desde</label>
-            <input type="date" value={filterDesde} onChange={e => setFilterDesde(e.target.value)}
-              className={`${selectCls} min-w-[140px]`} />
+            <input type="date" value={filterDesde} onChange={e => setFilterDesde(e.target.value)} className={`${selectCls} min-w-[140px]`} />
           </div>
+
           <div className="flex flex-col gap-0.5">
             <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Fecha hasta</label>
-            <input type="date" value={filterHasta} onChange={e => setFilterHasta(e.target.value)}
-              className={`${selectCls} min-w-[140px]`} />
+            <input type="date" value={filterHasta} onChange={e => setFilterHasta(e.target.value)} className={`${selectCls} min-w-[140px]`} />
           </div>
-          {(search || filterStatus !== "Todos" || filterTipo !== "Todos" || filterDelito !== "Todos" || filterAnalista !== "Todos" || filterDesde || filterHasta) && (
-            <button onClick={() => { setSearch(""); setFilterStatus("Todos"); setFilterTipo("Todos"); setFilterDelito("Todos"); setFilterAnalista("Todos"); setFilterDesde(""); setFilterHasta(""); }}
+
+          {(search || filterRecordStatus !== "Todos" || filterStatus !== "Todos" || filterTipo !== "Todos" || filterDelito !== "Todos" || filterAnalista !== "Todos" || filterDesde || filterHasta) && (
+            <button onClick={clearFilters}
               className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-md border border-red-200 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors self-end">
               <X size={12} /> Limpiar filtros
             </button>
@@ -1059,8 +1272,7 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
           <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
             <FileSearch size={32} className="opacity-30" />
             <p className="text-sm">No se encontraron expedientes con los filtros aplicados.</p>
-            <button onClick={() => { setSearch(""); setFilterStatus("Todos"); setFilterTipo("Todos"); setFilterDelito("Todos"); setFilterAnalista("Todos"); setFilterDesde(""); setFilterHasta(""); }}
-              className="text-xs text-primary hover:underline">Limpiar filtros</button>
+            <button onClick={clearFilters} className="text-xs text-primary hover:underline">Limpiar filtros</button>
           </div>
         ) : (
           <Table
@@ -1275,6 +1487,39 @@ function CaseDetailView({
     }
   }, [mode, autoOpenAddDefModal, onConsumedAutoOpenAddDefModal]);
 
+  const handleCancelCaseEdit = () => {
+    if (!isEdit) {
+      setView("cases");
+      return;
+    }
+
+    setDialog({
+      title: "Cancelar edición del expediente",
+      message: "Si cancela esta acción, se perderán los cambios realizados en el expediente.",
+      variant: "danger",
+      confirmLabel: "Sí, cancelar",
+      cancelLabel: "Volver",
+      onConfirm: () => {
+        setDialog(null);
+        setView("cases");
+      },
+      onCancel: () => setDialog(null),
+    });
+  };
+
+  const handleSaveCaseEdit = () => {
+    setDialog({
+      title: "Cambios guardados",
+      message: "Los cambios del expediente se guardaron correctamente.",
+      variant: "info",
+      confirmLabel: "Aceptar",
+      onConfirm: () => {
+        setDialog(null);
+        setView("cases");
+      },
+    });
+  };
+
   const handleCancelAddDef = () => {
     setDialog({
       title: "Cancelar imputado",
@@ -1411,8 +1656,8 @@ function CaseDetailView({
           )}
           {isEdit && (
             <>
-              <Btn variant="secondary" size="sm" onClick={() => setView("case-detail")}>Cancelar</Btn>
-              <Btn size="sm" icon={CheckCircle} onClick={() => setView("case-detail")}>Guardar Cambios</Btn>
+              <Btn variant="secondary" size="sm" onClick={handleCancelCaseEdit}>Cancelar</Btn>
+              <Btn size="sm" icon={CheckCircle} onClick={handleSaveCaseEdit}>Guardar Cambios</Btn>
             </>
           )}
         </div>
@@ -3707,36 +3952,205 @@ function ReportsView() {
 // ─── Settings View ────────────────────────────────────────────────────────────
 
 function SettingsView({ dark, setDark }: { dark: boolean; setDark: (b: boolean) => void }) {
+  const DEFAULT_SETTINGS = {
+    sessionTimeout: "30",
+    maxLoginAttempts: "5",
+    mfaRole: "Administrador y Supervisor",
+    maxFileSize: "20 MB",
+    allowedTypes: "PDF, DOCX, XLSX, JPG, PNG",
+    systemName: "UCAPREC",
+    institution: "Ministerio Público",
+  };
+
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [dialog, setDialog] = useState<null | {
+    title: string;
+    message: string;
+    variant?: "info" | "danger";
+    confirmLabel?: string;
+    cancelLabel?: string;
+    onConfirm: () => void;
+    onCancel?: () => void;
+  }>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("ucaprec_settings");
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      setSettings(prev => ({ ...prev, ...parsed }));
+      if (typeof parsed.darkMode === "boolean") setDark(parsed.darkMode);
+    } catch {
+      // Ignorar configuración corrupta y conservar valores por defecto
+    }
+  }, [setDark]);
+
+  const updateSetting = (key: keyof typeof settings, value: string) => {
+    setSettings(prev => ({ ...prev, [key]: value }));
+  };
+
+  const handleSaveSettings = () => {
+    try {
+      localStorage.setItem("ucaprec_settings", JSON.stringify({
+        ...settings,
+        darkMode: dark,
+      }));
+
+      setDialog({
+        title: "Configuración guardada",
+        message: "Los parámetros del sistema fueron guardados correctamente.",
+        variant: "info",
+        confirmLabel: "Aceptar",
+        onConfirm: () => setDialog(null),
+      });
+    } catch {
+      setDialog({
+        title: "No se pudo guardar",
+        message: "Ocurrió un problema al guardar la configuración. Intente nuevamente.",
+        variant: "danger",
+        confirmLabel: "Aceptar",
+        onConfirm: () => setDialog(null),
+      });
+    }
+  };
+
+  const handleResetDefaults = () => {
+    setDialog({
+      title: "Restablecer configuración",
+      message: "Se restaurarán los valores por defecto del sistema. Esta acción sobrescribirá la configuración actual.",
+      variant: "danger",
+      confirmLabel: "Sí, restablecer",
+      cancelLabel: "Volver",
+      onConfirm: () => {
+        setDialog(null);
+        setSettings(DEFAULT_SETTINGS);
+        setDark(false);
+        localStorage.removeItem("ucaprec_settings");
+      },
+      onCancel: () => setDialog(null),
+    });
+  };
+
   return (
     <div className="p-6">
       <SectionHeader title="Configuración del Sistema" sub="Parámetros globales y preferencias de la aplicación" />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {[
           {
             title: "Apariencia", icon: Sun, items: [
-              { label: "Tema de la interfaz", comp: <div className="flex gap-2">
-                <button onClick={() => setDark(false)} className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${!dark ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-muted"}`}>Claro</button>
-                <button onClick={() => setDark(true)} className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${dark ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-muted"}`}>Oscuro</button>
-              </div>}
+              {
+                label: "Tema de la interfaz",
+                comp: (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setDark(false)}
+                      className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${!dark ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+                    >
+                      Claro
+                    </button>
+                    <button
+                      onClick={() => setDark(true)}
+                      className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${dark ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+                    >
+                      Oscuro
+                    </button>
+                  </div>
+                )
+              }
             ]
           },
           {
             title: "Seguridad", icon: Lock, items: [
-              { label: "Tiempo de sesión (minutos)", comp: <input type="number" defaultValue="30" className="w-24 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground" /> },
-              { label: "Intentos máximos de login", comp: <input type="number" defaultValue="5" className="w-24 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground" /> },
-              { label: "MFA obligatorio por rol", comp: <select className="text-sm bg-input-background border border-border rounded-md px-2 py-1.5 outline-none text-foreground"><option>Administrador y Supervisor</option></select> },
+              {
+                label: "Tiempo de sesión (minutos)",
+                comp: (
+                  <input
+                    type="number"
+                    value={settings.sessionTimeout}
+                    onChange={e => updateSetting("sessionTimeout", e.target.value)}
+                    className="w-24 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground"
+                  />
+                )
+              },
+              {
+                label: "Intentos máximos de login",
+                comp: (
+                  <input
+                    type="number"
+                    value={settings.maxLoginAttempts}
+                    onChange={e => updateSetting("maxLoginAttempts", e.target.value)}
+                    className="w-24 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground"
+                  />
+                )
+              },
+              {
+                label: "MFA obligatorio por rol",
+                comp: (
+                  <select
+                    value={settings.mfaRole}
+                    onChange={e => updateSetting("mfaRole", e.target.value)}
+                    className="text-sm bg-input-background border border-border rounded-md px-2 py-1.5 outline-none text-foreground"
+                  >
+                    <option>Administrador y Supervisor</option>
+                    <option>Solo Administrador</option>
+                    <option>Todos los roles</option>
+                    <option>No requerido</option>
+                  </select>
+                )
+              },
             ]
           },
           {
             title: "Archivos Adjuntos", icon: FileText, items: [
-              { label: "Tamaño máximo por archivo", comp: <select className="text-sm bg-input-background border border-border rounded-md px-2 py-1.5 outline-none text-foreground"><option>20 MB</option><option>10 MB</option><option>50 MB</option></select> },
-              { label: "Tipos permitidos", comp: <input defaultValue="PDF, DOCX, XLSX, JPG, PNG" className="w-64 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground" /> },
+              {
+                label: "Tamaño máximo por archivo",
+                comp: (
+                  <select
+                    value={settings.maxFileSize}
+                    onChange={e => updateSetting("maxFileSize", e.target.value)}
+                    className="text-sm bg-input-background border border-border rounded-md px-2 py-1.5 outline-none text-foreground"
+                  >
+                    <option>20 MB</option>
+                    <option>10 MB</option>
+                    <option>50 MB</option>
+                  </select>
+                )
+              },
+              {
+                label: "Tipos permitidos",
+                comp: (
+                  <input
+                    value={settings.allowedTypes}
+                    onChange={e => updateSetting("allowedTypes", e.target.value)}
+                    className="w-64 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground"
+                  />
+                )
+              },
             ]
           },
           {
             title: "Sistema", icon: Database, items: [
-              { label: "Nombre del sistema", comp: <input defaultValue="UCAPREC" className="w-40 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground" /> },
-              { label: "Institución", comp: <input defaultValue="Ministerio Público" className="w-64 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground" /> },
+              {
+                label: "Nombre del sistema",
+                comp: (
+                  <input
+                    value={settings.systemName}
+                    onChange={e => updateSetting("systemName", e.target.value)}
+                    className="w-40 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground"
+                  />
+                )
+              },
+              {
+                label: "Institución",
+                comp: (
+                  <input
+                    value={settings.institution}
+                    onChange={e => updateSetting("institution", e.target.value)}
+                    className="w-64 px-3 py-1.5 text-sm bg-input-background border border-border rounded-md outline-none text-foreground"
+                  />
+                )
+              },
               { label: "Versión del sistema", comp: <span className="font-mono text-xs text-muted-foreground">v1.0.0-beta</span> },
             ]
           },
@@ -3748,7 +4162,7 @@ function SettingsView({ dark, setDark }: { dark: boolean; setDark: (b: boolean) 
             </div>
             <div className="p-5 space-y-4">
               {items.map(({ label, comp }) => (
-                <div key={label} className="flex items-center justify-between">
+                <div key={label} className="flex items-center justify-between gap-4">
                   <label className="text-sm text-foreground">{label}</label>
                   {comp}
                 </div>
@@ -3757,10 +4171,22 @@ function SettingsView({ dark, setDark }: { dark: boolean; setDark: (b: boolean) 
           </div>
         ))}
       </div>
+
       <div className="mt-6 flex justify-end gap-2">
-        <Btn variant="secondary">Restablecer valores por defecto</Btn>
-        <Btn icon={CheckCircle}>Guardar Configuración</Btn>
+        <Btn variant="secondary" onClick={handleResetDefaults}>Restablecer valores por defecto</Btn>
+        <Btn icon={CheckCircle} onClick={handleSaveSettings}>Guardar Configuración</Btn>
       </div>
+
+      <ActionDialog
+        open={dialog !== null}
+        title={dialog?.title ?? ""}
+        message={dialog?.message ?? ""}
+        variant={dialog?.variant ?? "info"}
+        confirmLabel={dialog?.confirmLabel ?? "Aceptar"}
+        cancelLabel={dialog?.cancelLabel}
+        onConfirm={dialog?.onConfirm ?? (() => setDialog(null))}
+        onCancel={dialog?.onCancel}
+      />
     </div>
   );
 }
@@ -3959,7 +4385,7 @@ const VIEW_TITLES: Record<View, string> = {
   dashboard: "Dashboard", cases: "Expedientes", "case-detail": "Detalle del Expediente",
   "case-form": "Editar Expediente", "case-new": "Nuevo Expediente", defendants: "Imputados", victims: "Víctimas",
   measures: "Medidas y Alertas", documents: "Documentos", reports: "Reportes",
-  analytics: "Analítica", users: "Usuarios y Roles", audit: "Auditoría",
+  analytics: "Analítica", notifications: "Notificaciones", users: "Usuarios y Roles", audit: "Auditoría",
   catalogs: "Catálogos", settings: "Configuración",
 };
 
@@ -3972,6 +4398,7 @@ export default function App() {
   const [caseFormStartTab, setCaseFormStartTab] = useState(0);
   const [autoOpenAddDefModal, setAutoOpenAddDefModal] = useState(false);
   const [selectedDefendantCaseId, setSelectedDefendantCaseId] = useState("");
+  const [selectedNotificationCaseId, setSelectedNotificationCaseId] = useState("");
 
   // ── Navigation history ──
   const [navHist, setNavHist] = useState<View[]>(["dashboard"]);
@@ -4009,10 +4436,23 @@ export default function App() {
   }, [dark]);
 
   const openAddImputadoFromDefendants = useCallback((caseId: string) => {
+    setSelectedNotificationCaseId("");
     setSelectedDefendantCaseId(caseId);
     setCaseFormStartTab(1);
     setAutoOpenAddDefModal(true);
     navigate("case-form");
+  }, [navigate]);
+
+  const openCaseFromNotification = useCallback((caseId: string) => {
+    setSelectedDefendantCaseId("");
+    setSelectedNotificationCaseId(caseId);
+    setCaseFormStartTab(0);
+    setAutoOpenAddDefModal(false);
+    navigate("case-form");
+  }, [navigate]);
+
+  const openNotificationsCenter = useCallback(() => {
+    navigate("notifications");
   }, [navigate]);
 
   const renderView = () => {
@@ -4026,7 +4466,7 @@ export default function App() {
           mode="form"
           initialTab={caseFormStartTab}
           autoOpenAddDefModal={autoOpenAddDefModal}
-          selectedCaseId={selectedDefendantCaseId}
+          selectedCaseId={selectedNotificationCaseId || selectedDefendantCaseId}
           onConsumedAutoOpenAddDefModal={() => setAutoOpenAddDefModal(false)}
         />
       );
@@ -4035,6 +4475,7 @@ export default function App() {
       case "victims": return <VictimsView setView={navigate} />;
       case "measures": return <MeasuresView setView={navigate} />;
       case "documents": return <DocumentsView setView={navigate} />;
+      case "notifications": return <NotificationsView openCaseFromNotification={openCaseFromNotification} />;
       case "reports": return <ReportsView />;
       case "analytics": return <AnalyticsView />;
       case "users": return <UsersView />;
@@ -4058,6 +4499,8 @@ export default function App() {
           goBack={goBack}
           canGoBack={canGoBack}
           breadcrumb={breadcrumb}
+          openCaseFromNotification={openCaseFromNotification}
+          openNotificationsCenter={openNotificationsCenter}
         />
         <main className="flex-1 overflow-y-auto">
           {renderView()}
