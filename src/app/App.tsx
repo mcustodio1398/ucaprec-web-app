@@ -21,7 +21,7 @@ import {
   ResponsiveContainer, AreaChart, Area, LabelList
 } from "recharts";
 import mpLogo from "../imports/Logo_-_Ministerio_Publico_-_Horizontal.png";
-
+import { supabase } from '../lib/supabase'
 // ─── Types ─────────────────────────────────────────────────────────────────
 
 type View =
@@ -859,8 +859,56 @@ function exportDashboardPDF() {
 }
 
 function DashboardView({ setView }: { setView: (v: View) => void }) {
-  const totalImputados = defendants.length;
+const [dashboardKpis, setDashboardKpis] = useState<null | {
+  expedientes_totales: number
+  imputados_totales: number
+  profugos_activos: number
+  en_rebeldia: number
+  expedientes_en_revision: number
+  alertas_rojas: number
+  alertas_migratorias: number
+  ordenes_arresto: number
+  subidos_a_pn: number
+}>(null)
+
+
+  useEffect(() => {
+    let active = true
+
+    supabase
+      .from('vw_dashboard_kpis')
+      .select('*')
+      .single()
+      .then(({ data, error }) => {
+        if (!active) return
+
+        if (error) {
+          console.error('Error cargando vw_dashboard_kpis:', error)
+          return
+        }
+
+        setDashboardKpis(data)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+const dashboardValues = {
+  expedientesTotales: dashboardKpis?.expedientes_totales ?? KPI.total,
+  imputadosTotales: dashboardKpis?.imputados_totales ?? defendants.length,
+  profugosActivos: dashboardKpis?.profugos_activos ?? KPI.profugos,
+  enRebeldia: dashboardKpis?.en_rebeldia ?? KPI.rebeldes,
+  pendientesRevision: dashboardKpis?.expedientes_en_revision ?? KPI.pendReview,
+  alertasRojas: dashboardKpis?.alertas_rojas ?? KPI.alertaRoja,
+  alertasMigratorias: dashboardKpis?.alertas_migratorias ?? KPI.alertaMig,
+  ordenesArresto: dashboardKpis?.ordenes_arresto ?? KPI.ordenArresto,
+  subidosPN: dashboardKpis?.subidos_a_pn ?? 284,
+}
+
   return (
+
     <div className="p-6 space-y-6">
       <SectionHeader
         title="Estadísticas Sobre la Unidad de Captura de Prófugos, Rebeldes y Condenados (UCAPREC)"
@@ -875,26 +923,26 @@ function DashboardView({ setView }: { setView: (v: View) => void }) {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-        <KPICard label="Expedientes Totales" value={KPI.total} delta="+47 este mes"
+        <KPICard label="Expedientes Totales" value={dashboardValues.expedientesTotales} delta="+47 este mes"
           icon={FolderOpen} bg="bg-blue-50 dark:bg-blue-900/20" fg="text-blue-700 dark:text-blue-400" sub="Desde 1990 a la fecha" />
-        <KPICard label="Imputados Totales" value={totalImputados}
+        <KPICard label="Imputados Totales" value={dashboardValues.imputadosTotales}
           icon={Users} bg="bg-sky-50 dark:bg-sky-900/20" fg="text-sky-700 dark:text-sky-400" sub="Registros cargados actualmente" />
-        <KPICard label="Prófugos Activos" value={KPI.profugos} delta="+8 este mes"
+        <KPICard label="Prófugos Activos" value={dashboardValues.profugosActivos} delta="+8 este mes"
           icon={UserX} bg="bg-red-50 dark:bg-red-900/20" fg="text-red-700 dark:text-red-400" />
-        <KPICard label="En Rebeldía" value={KPI.rebeldes} delta="-3 este mes"
+        <KPICard label="En Rebeldía" value={dashboardValues.enRebeldia} delta="-3 este mes"
           icon={Gavel} bg="bg-amber-50 dark:bg-amber-900/20" fg="text-amber-700 dark:text-amber-400" />
-        <KPICard label="Pendiente Revisión" value={KPI.pendReview}
+        <KPICard label="Pendiente Revisión" value={dashboardValues.pendientesRevision}
           icon={Clock} bg="bg-orange-50 dark:bg-orange-900/20" fg="text-orange-700 dark:text-orange-400" sub="Sin verificar >7 días" />
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <KPICard label="Alertas Rojas" value={KPI.alertaRoja} delta="+22 este mes"
+        <KPICard label="Alertas Rojas" value={dashboardValues.alertasRojas} delta="+22 este mes"
           icon={AlertOctagon} bg="bg-red-50 dark:bg-red-900/20" fg="text-red-700 dark:text-red-400" />
-        <KPICard label="Alertas Migratorias" value={KPI.alertaMig} delta="+35 este mes"
+        <KPICard label="Alertas Migratorias" value={dashboardValues.alertasMigratorias} delta="+35 este mes"
           icon={Globe} bg="bg-indigo-50 dark:bg-indigo-900/20" fg="text-indigo-700 dark:text-indigo-400" />
-        <KPICard label="Órdenes de Arresto" value={KPI.ordenArresto} delta="+48 este mes"
+        <KPICard label="Órdenes de Arresto" value={dashboardValues.ordenesArresto} delta="+48 este mes"
           icon={Lock} bg="bg-violet-50 dark:bg-violet-900/20" fg="text-violet-700 dark:text-violet-400" />
-        <KPICard label="Subidos a PN" value={284} delta="+31 este mes"
+        <KPICard label="Subidos a PN" value={dashboardValues.subidosPN} delta="+31 este mes"
           icon={UserCheck} bg="bg-teal-50 dark:bg-teal-900/20" fg="text-teal-700 dark:text-teal-400" />
       </div>
 
