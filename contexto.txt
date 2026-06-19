@@ -1,0 +1,165 @@
+Ventana de contexto actual - UCAPREC
+Fecha: 2026-06-19
+
+Rol de trabajo asumido:
+Desarrollador senior full-stack / arquitecto React + Vite + TypeScript + Supabase + Netlify, con prioridad en terminar una versión funcional y publicable hoy.
+
+Objetivo actual:
+Dejar la aplicación institucional UCAPREC funcionando de forma estable, conectada a Supabase donde ya existen tablas/vistas, sin datos ficticios visibles en producción, con login inicial y lista para publicar en Netlify.
+
+Cambios realizados en esta sesión:
+
+1. Integración y limpieza de datos ficticios
+- Dashboard:
+  - Los KPI ya no caen a valores mock; si `vw_dashboard_kpis` no devuelve datos, se muestran ceros.
+  - La tabla de expedientes recientes ahora consulta `expedientes` desde Supabase.
+  - Si no hay expedientes recientes, muestra estado vacío.
+  - La actividad reciente y notificaciones quedaron vacías por defecto para no mostrar alertas inventadas.
+- Expedientes:
+  - El listado principal carga desde la tabla `expedientes`.
+  - Si Supabase falla o no hay datos, se muestra vacío limpio.
+- Imputados:
+  - El listado carga desde `imputados`.
+  - La selección de expediente para agregar imputado carga opciones desde `expedientes`.
+- Víctimas:
+  - El listado carga desde `victimas`.
+- Medidas y Alertas:
+  - El listado carga desde `medidas_alertas_expediente`.
+- Documentos:
+  - El listado carga desde `documentos`.
+- Usuarios:
+  - El listado carga desde `usuarios`.
+- Auditoría:
+  - El listado carga desde `auditoria`.
+- Se agregó una capa de adaptadores tolerantes a nombres de columnas para mapear datos de Supabase hacia la UI sin depender de un único nombre exacto para cada columna.
+
+2. Login inicial creado
+- Se creó una pantalla de login institucional como puerta de entrada de la app.
+- Permite entrar con correo institucional o usuario:
+  - Correo: michael.custodio@pgr.gob.do
+  - Usuario: michael.custodio
+  - Contraseña temporal: 12345
+- Rol asignado temporalmente: Administrador.
+- El módulo `Usuarios y Roles` conserva este usuario administrador temporal aunque la tabla `usuarios` esté vacía o no responda, para garantizar acceso administrativo visible durante las pruebas.
+- Se agregaron usuarios temporales de prueba para validar permisos:
+  - `supervisor.ucaprec` / `12345`
+  - `analista.ucaprec` / `12345`
+- El login ahora es general: cualquier usuario temporal válido entra y la UI filtra módulos según su rol.
+- El login usa el logo blanco institucional proporcionado por el usuario.
+- El login incluye:
+  - Campo de usuario/correo.
+  - Campo de contraseña.
+  - Mostrar/ocultar contraseña.
+  - Recordar sesión.
+  - Validación y mensaje de error.
+  - Botón de recuperación de acceso visual.
+  - Diseño institucional con logo del Ministerio Público.
+- La sesión se guarda en `localStorage` si se marca recordar sesión, o en `sessionStorage` si no.
+- El menú lateral muestra el usuario autenticado: Michael Custodio, Administrador.
+- Se agregó cierre de sesión desde el menú lateral.
+
+Nota importante de seguridad:
+La contraseña `12345` está implementada temporalmente en frontend solo para pruebas. Antes de producción real debe reemplazarse por Supabase Auth o autenticación institucional segura.
+
+3. Navegación de expedientes
+- El listado de expedientes ahora conserva el ID seleccionado al abrir detalle o edición.
+- Si se intenta abrir detalle sin expediente seleccionado, se muestra una pantalla limpia indicando que debe seleccionarse un expediente real.
+- El botón `Guardar Cambios` en nuevo expediente ahora intenta insertar en Supabase usando la tabla `expedientes`.
+- Si Supabase devuelve 401, el sistema muestra un mensaje de permisos/RLS en vez de simular guardado.
+
+4. Roles y navegación
+- Solo usuarios con rol `Administrador` ven las secciones administrativas:
+  - Usuarios y Roles
+  - Auditoría
+  - Catálogos
+  - Configuración
+  - Analítica
+- Usuarios no administradores ven:
+  - Dashboard
+  - Expedientes
+  - Imputados
+  - Víctimas
+  - Medidas y Alertas
+  - Documentos
+  - Reportes
+- Se eliminó la barra de búsqueda superior junto a la campana de notificaciones.
+
+5. Exportaciones y reportes
+- Se agregó exportación tipo Excel (`.xls`) para módulos con opción de exportar Excel.
+- La exportación usa las columnas visibles/actuales de cada módulo.
+- La paginación inferior ya no muestra `1-7 de 1,847`; ahora calcula el total real de resultados filtrados.
+- El módulo Reportes fue convertido en un generador de reporte completo de expedientes:
+  - Consulta `expedientes` en Supabase.
+  - Permite filtrar por expediente/sentencia y estado del registro.
+  - Exporta todas las columnas/variables disponibles en la tabla `expedientes`.
+
+6. Supabase / 401
+- Se creó `supabase_policies_ucaprec.sql` con políticas mínimas de prueba para habilitar lectura e inserción controlada durante pruebas.
+- El archivo SQL es temporal y debe reemplazarse por políticas seguras basadas en Supabase Auth antes de producción real.
+- Se creó `supabase_reset_schema_ucaprec.sql` como script principal para reconstruir Supabase desde cero:
+  - Elimina tablas/vistas actuales.
+  - Crea tablas alineadas al frontend actual.
+  - Crea `vw_dashboard_kpis` y `vw_expedientes_requieren_atencion`.
+  - Inserta roles y usuarios temporales de prueba.
+  - Crea catálogos mínimos.
+  - Habilita RLS y políticas temporales de lectura/escritura para pruebas.
+- Antes de ejecutar el reset completo, confirmar que no hay datos reales que deban conservarse.
+- Revisar en Supabase Project Settings > API:
+  - Project URL debe coincidir con `VITE_SUPABASE_URL`.
+  - Publishable key debe coincidir con `VITE_SUPABASE_ANON_KEY`.
+  - Si la llave fue rotada, actualizar `.env.local` y variables de Netlify.
+
+7. Configuración de despliegue
+- Se agregó `netlify.toml` con:
+  - Build command: `npm run build`
+  - Publish directory: `dist`
+  - Node version: 22
+  - Redirect SPA hacia `index.html`
+- Se agregó `.env.example` con variables:
+  - `VITE_SUPABASE_URL`
+  - `VITE_SUPABASE_ANON_KEY`
+- Se agregó `tsconfig.json` local para evitar depender de configuración TypeScript fuera del proyecto.
+- Se agregó `CHECKLIST_PRODUCCION.md` con pasos de validación antes de publicar.
+
+Estado de verificación:
+- Se intentó correr `npm run build`, pero el sandbox local de Codex bloqueó a Vite/esbuild al intentar leer carpetas superiores al proyecto:
+  - Error principal: `Cannot read directory "../..": Access is denied.`
+- Tras crear el login, se volvió a intentar el build y el bloqueo persistió por la misma restricción del sandbox, esta vez resolviendo desde una ruta interna de Codex Sandbox Offline.
+- Esto ocurre antes de evaluar el código de la app, por lo que no confirma un error de código.
+- También se intentó una verificación directa con esbuild y cayó por la misma restricción del entorno.
+- Se ejecutaron búsquedas y revisiones estáticas para detectar referencias rotas o inserciones equivocadas.
+- Se corrigió un error introducido durante la sesión donde una carga de usuarios había quedado temporalmente dentro del bloque de Medidas.
+
+Recomendaciones razonables para garantizar funcionamiento hoy:
+- Publicar una versión MVP estable con lectura real desde Supabase y estados vacíos limpios.
+- Configurar las variables de entorno en Netlify antes de publicar.
+- Confirmar políticas RLS o permisos de lectura en Supabase para:
+  - `vw_dashboard_kpis`
+  - `expedientes`
+  - `imputados`
+  - `victimas`
+  - `medidas_alertas_expediente`
+  - `documentos`
+  - `usuarios`
+  - `auditoria`
+- Probar primero en Netlify con navegador incógnito.
+- Mantener CRUD visual si no hay tiempo para persistencia completa, pero no mostrar datos ficticios.
+- Reemplazar login temporal por Supabase Auth en cuanto se cierre el MVP.
+
+Archivos modificados/creados:
+- `src/app/App.tsx`
+- `tsconfig.json`
+- `netlify.toml`
+- `.env.example`
+- `CHECKLIST_PRODUCCION.md`
+- `VENTANA_CONTEXTO_ACTUAL_UCAPREC.txt`
+- `supabase_policies_ucaprec.sql`
+- `supabase_reset_schema_ucaprec.sql`
+- `src/imports/Logo_Ministerio_Publico_Blanco.png`
+
+Pendientes técnicos sugeridos:
+- Conectar detalle de expediente por ID real desde Supabase.
+- Persistir creación/edición/eliminación en Supabase para Expedientes, Imputados, Víctimas, Medidas, Documentos y Usuarios.
+- Crear autenticación real con Supabase Auth o proveedor institucional.
+- Revisar nombres exactos de columnas en Supabase para afinar adaptadores.
+- Ejecutar build fuera del sandbox o en Netlify.
