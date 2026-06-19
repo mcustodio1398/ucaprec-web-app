@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Descargas UCAPREC</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font-family: Arial, sans-serif;
+        background: #f4f7fb;
+        color: #10213f;
+      }
+      main {
+        width: min(720px, calc(100% - 32px));
+        background: white;
+        border: 1px solid #d9e1ec;
+        border-radius: 10px;
+        padding: 28px;
+        box-shadow: 0 18px 45px rgba(16, 33, 63, 0.12);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 24px;
+      }
+      p {
+        margin: 0 0 22px;
+        color: #52637a;
+        line-height: 1.5;
+      }
+      .links {
+        display: grid;
+        gap: 12px;
+      }
+      a {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 14px 16px;
+        border: 1px solid #d9e1ec;
+        border-radius: 8px;
+        color: #12315f;
+        text-decoration: none;
+        font-weight: 700;
+      }
+      a:hover {
+        background: #eef4ff;
+        border-color: #9db9e8;
+      }
+      span {
+        color: #6a7b91;
+        font-size: 13px;
+        font-weight: 400;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Descargas UCAPREC</h1>
+      <p>
+        Si el visor interno no abre los archivos, usa estos enlaces para descargarlos
+        como archivos de texto y abrirlos con Bloc de notas, VS Code o pegarlos en Supabase.
+      </p>
+      <div class="links">
+        <a href="contexto_ucaprec.txt" download>
+          Ventana de contexto
+          <span>contexto_ucaprec.txt</span>
+        </a>
+        <a href="supabase_ucaprec.txt" download>
+          Script Supabase
+          <span>supabase_ucaprec.txt</span>
+        </a>
+      </div>
+    </main>
+  </body>
+</html>

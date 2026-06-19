@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, type FormEvent, type ReactNode } from "react";
 import {
   PROVINCIAS, getMunicipios, getSectores,
   INFRACCIONES, CENTROS_PENITENCIARIOS, JURISDICCIONES, NACIONALIDADES,
@@ -21,7 +21,8 @@ import {
   ResponsiveContainer, AreaChart, Area, LabelList
 } from "recharts";
 import mpLogo from "../imports/Logo_-_Ministerio_Publico_-_Horizontal.png";
-
+import mpWhiteLogo from "../imports/Logo_Ministerio_Publico_Blanco.png";
+import { supabase } from '../lib/supabase'
 // ─── Types ─────────────────────────────────────────────────────────────────
 
 type View =
@@ -31,6 +32,52 @@ type View =
 
 interface NavItem { id: View; label: string; icon: any; badge?: number }
 interface NavGroup { label: string; items: NavItem[] }
+interface SessionUser { name: string; username: string; email: string; role: string; initials: string }
+
+// ─── Temporary access user ───────────────────────────────────────────────────
+
+const ADMIN_USER: SessionUser = {
+  name: "Michael Custodio",
+  username: "michael.custodio",
+  email: "michael.custodio@pgr.gob.do",
+  role: "Administrador",
+  initials: "MC",
+};
+
+const toInstitutionalEmail = (identifier: string) => {
+  const value = identifier.trim().toLowerCase();
+  return value.includes("@") ? value : `${value}@pgr.gob.do`;
+};
+
+const initialsFromName = (name: string, email: string) => {
+  const source = name.trim() || email.split("@")[0].replace(/[._-]+/g, " ");
+  return source
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(part => part[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase() || "UC";
+};
+
+const sessionUserFromAuthUser = (authUser: any): SessionUser => {
+  const appMeta = authUser?.app_metadata ?? {};
+  const userMeta = authUser?.user_metadata ?? {};
+  const email = firstText(authUser?.email);
+  const username = firstText(appMeta.username, userMeta.username, email.split("@")[0]);
+  const name = firstText(appMeta.name, userMeta.name, userMeta.full_name, username);
+  const role = email.toLowerCase() === ADMIN_USER.email.toLowerCase()
+    ? "Administrador"
+    : firstText(appMeta.role, userMeta.role, "Analista");
+
+  return {
+    name,
+    username,
+    email,
+    role,
+    initials: firstText(appMeta.initials, userMeta.initials, initialsFromName(name, email)),
+  };
+};
 
 // ─── Mock Data ──────────────────────────────────────────────────────────────
 
@@ -58,41 +105,15 @@ const alertColors: Record<string, string> = {
   "Arresto": "bg-amber-600 text-white",
 };
 
-const evolutionData = [
-  { mes: "Ene", casos: 38 }, { mes: "Feb", casos: 45 }, { mes: "Mar", casos: 42 },
-  { mes: "Abr", casos: 51 }, { mes: "May", casos: 47 }, { mes: "Jun", casos: 53 },
-  { mes: "Jul", casos: 61 }, { mes: "Ago", casos: 58 }, { mes: "Sep", casos: 49 },
-  { mes: "Oct", casos: 67 }, { mes: "Nov", casos: 71 }, { mes: "Dic", casos: 47 },
-];
+const evolutionData: Array<{ mes: string; casos: number }> = [];
 
-const statusPieData = [
-  { name: "Prófugo", value: 342, color: "#B91C1C" },
-  { name: "Rebeldía", value: 218, color: "#D97706" },
-  { name: "Recluido", value: 891, color: "#059669" },
-  { name: "Absuelto", value: 396, color: "#94A3B8" },
-];
+const statusPieData: Array<{ name: string; value: number; color: string }> = [];
 
-const districtData = [
-  { name: "D. Nacional", casos: 412 }, { name: "Santiago", casos: 287 },
-  { name: "San Cristóbal", casos: 198 }, { name: "La Vega", casos: 143 },
-  { name: "Puerto Plata", casos: 112 }, { name: "San Pedro", casos: 98 },
-  { name: "Barahona", casos: 67 }, { name: "Otros", casos: 530 },
-];
+const districtData: Array<{ name: string; casos: number }> = [];
 
-const byTypeData = [
-  { name: "Sentencia", value: 1124, fill: "#1D4ED8" },
-  { name: "Resolución", value: 548, fill: "#059669" },
-  { name: "Casación", value: 175, fill: "#D97706" },
-];
+const byTypeData: Array<{ name: string; value: number; fill: string }> = [];
 
-const alertsByMonthData = [
-  { mes: "Jul", roja: 12, migratoria: 24, arresto: 31 },
-  { mes: "Ago", roja: 15, migratoria: 28, arresto: 36 },
-  { mes: "Sep", roja: 11, migratoria: 21, arresto: 29 },
-  { mes: "Oct", roja: 18, migratoria: 32, arresto: 41 },
-  { mes: "Nov", roja: 22, migratoria: 35, arresto: 48 },
-  { mes: "Dic", roja: 14, migratoria: 27, arresto: 38 },
-];
+const alertsByMonthData: Array<{ mes: string; roja: number; migratoria: number; arresto: number }> = [];
 
 const recentCases = [
   { id: "EXP-2024-1847", sentencia: "SCJ-PEN-2024-0892", imputado: "Carlos A. Méndez Ríos", delito: "Lavado de Activos", tipo: "Sentencia", estatus: "Prófugo", alerta: "Roja", estReg: "Verificado", fecha: "28/11/2024", asignado: "A. Rodríguez" },
@@ -133,13 +154,109 @@ const auditData = [
   { id: 8, usuario: "rherrera", accion: "RESETEAR_CONTRASEÑA", modulo: "Usuarios", entidad: "jtorres", detalle: "Contraseña restablecida por administrador", ip: "192.168.1.1", fecha: "22/11/2024 14:02:55", tipo: "security" },
 ];
 
-const systemAlerts = [
-  { id: 1, type: "danger", msg: "Alerta roja activada — EXP-2024-1847: Carlos Méndez Ríos (Lavado de Activos)", time: "hace 2h", exp: "EXP-2024-1847", action: "open-case" },
-  { id: 2, type: "warning", msg: "Alerta migratoria actualizada — EXP-2024-1846: INVERSALUD S.A.", time: "hace 5h", exp: "EXP-2024-1846", action: "open-case" },
-  { id: 3, type: "info", msg: "EXP-2024-1839 asignado a Ana Rodríguez por supervisor", time: "hace 8h", exp: "EXP-2024-1839", action: "open-case" },
-  { id: 4, type: "success", msg: "Documento Sentencia_0881.pdf subido correctamente en EXP-2024-1844", time: "hace 10h", exp: "EXP-2024-1844", action: "open-case" },
-  { id: 5, type: "warning", msg: "EXP-2024-1821 pendiente de verificación — 14 días sin actualizar", time: "hace 1d", exp: "EXP-2024-1821", action: "open-case" },
-];
+const systemAlerts: Array<{
+  id: number;
+  type: "danger" | "warning" | "info" | "success";
+  msg: string;
+  time: string;
+  exp?: string;
+  action?: string;
+}> = [];
+
+// ─── Supabase row adapters ───────────────────────────────────────────────────
+
+type DbRow = Record<string, any>;
+
+const firstText = (...values: any[]) => {
+  const value = values.find(v => v !== null && v !== undefined && String(v).trim() !== "");
+  return value === undefined ? "" : String(value);
+};
+
+const firstBool = (...values: any[]) => values.some(v => v === true || v === 1 || v === "true" || v === "Sí" || v === "si");
+
+const firstId = (fallback: number, ...values: any[]) => {
+  const raw = values.find(v => v !== null && v !== undefined && String(v).trim() !== "");
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const formatDate = (...values: any[]) => {
+  const raw = firstText(...values);
+  if (!raw) return "";
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? raw : date.toLocaleDateString("es-DO");
+};
+
+const formatDateTime = (...values: any[]) => {
+  const raw = firstText(...values);
+  if (!raw) return "";
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? raw : date.toLocaleString("es-DO");
+};
+
+const todayLong = () => new Date().toLocaleDateString("es-DO", {
+  day: "2-digit",
+  month: "long",
+  year: "numeric",
+});
+
+const monthLabel = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Sin fecha";
+  return date.toLocaleDateString("es-DO", { month: "short" }).replace(".", "");
+};
+
+const mapExpedienteRow = (row: DbRow, idx: number): typeof recentCases[number] => ({
+  id: firstText(row.numero_expediente, row.no_expediente, row.codigo, row.expediente, row.id, `EXP-${idx + 1}`),
+  sentencia: firstText(row.numero_sentencia, row.no_sentencia, row.sentencia, row.referencia_sentencia),
+  imputado: firstText(row.imputado_principal, row.imputado, row.nombre_imputado),
+  delito: firstText(row.delito_principal, row.delito, row.infraccion),
+  tipo: firstText(row.tipo_expediente, row.tipo, row.tipo_documento),
+  estatus: firstText(row.estado_imputado, row.estatus_imputado, row.estatus, row.estado),
+  alerta: firstText(row.alerta, row.tipo_alerta, firstBool(row.alerta_roja) ? "Roja" : firstBool(row.alerta_migratoria) ? "Migratoria" : "—"),
+  estReg: firstText(row.estado_registro, row.estatus_registro, row.estado_revision),
+  fecha: formatDate(row.fecha_registro, row.created_at, row.fecha),
+  asignado: firstText(row.asignado_a, row.analista, row.usuario_asignado),
+});
+
+const mapImputadoRow = (row: DbRow, idx: number): typeof defendants[number] => ({
+  id: firstId(idx + 1, row.id, row.imputado_id),
+  nombre: firstText(row.nombre_completo, row.nombre, row.razon_social),
+  doc: firstText(row.documento, row.cedula, row.rnc, row.identificacion),
+  edad: firstId(0, row.edad),
+  sexo: firstText(row.sexo, row.tipo_persona),
+  estatus: firstText(row.estado_imputado, row.estatus, row.estado),
+  estJud: firstText(row.estado_judicial, row.estatus_judicial),
+  pena: firstText(row.pena, row.pena_impuesta),
+  alertaRoja: firstBool(row.alerta_roja, row.alerta_interpol),
+  alertaMig: firstBool(row.alerta_migratoria),
+  ordenArresto: firstBool(row.orden_arresto),
+  policia: firstBool(row.subido_pn, row.subido_a_pn, row.policia),
+  exp: firstText(row.numero_expediente, row.expediente, row.expediente_id),
+});
+
+const mapUsuarioRow = (row: DbRow, idx: number): typeof usersData[number] => ({
+  id: firstId(idx + 1, row.id, row.usuario_id),
+  nombre: firstText(row.nombre_completo, row.nombre),
+  usuario: firstText(row.usuario, row.username, row.email),
+  rol: firstText(row.rol, row.nombre_rol, row.role),
+  estatus: firstText(row.estatus, row.estado, row.activo === false ? "Inactivo" : "Activo"),
+  acceso: formatDateTime(row.ultimo_acceso, row.last_sign_in_at, row.updated_at),
+  casos: firstId(0, row.casos, row.casos_asignados),
+  email: firstText(row.email, row.correo),
+});
+
+const mapAuditRow = (row: DbRow, idx: number): typeof auditData[number] => ({
+  id: firstId(idx + 1, row.id),
+  usuario: firstText(row.usuario, row.user_name, row.user_email),
+  accion: firstText(row.accion, row.action),
+  modulo: firstText(row.modulo, row.module),
+  entidad: firstText(row.entidad, row.entity, row.registro_id),
+  detalle: firstText(row.detalle, row.descripcion, row.description),
+  ip: firstText(row.ip, row.ip_address),
+  fecha: formatDateTime(row.fecha, row.created_at),
+  tipo: firstText(row.tipo, row.type, "info"),
+});
 
 // ─── Export / Print utilities ────────────────────────────────────────────────
 
@@ -149,6 +266,32 @@ function downloadCSV(headers: string[], rows: (string | number)[][], filename: s
   const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = Object.assign(document.createElement("a"), { href: url, download: filename });
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function downloadExcel(headers: string[], rows: (string | number | boolean | null | undefined)[][], filename: string) {
+  const escapeHtml = (value: string | number | boolean | null | undefined) =>
+    String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  const table = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
+      <head><meta charset="UTF-8" /></head>
+      <body>
+        <table>
+          <thead><tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead>
+          <tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody>
+        </table>
+      </body>
+    </html>`;
+  const blob = new Blob([table], { type: "application/vnd.ms-excel;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement("a"), { href: url, download: filename.replace(/\.xlsx?$/i, "") + ".xls" });
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -193,10 +336,10 @@ const NAV: NavGroup[] = [
   {
     label: "Gestión",
     items: [
-      { id: "cases", label: "Expedientes", icon: FolderOpen, badge: 93 },
+      { id: "cases", label: "Expedientes", icon: FolderOpen },
       { id: "defendants", label: "Imputados", icon: UserX },
       { id: "victims", label: "Víctimas", icon: Users },
-      { id: "measures", label: "Medidas y Alertas", icon: AlertOctagon, badge: 156 },
+      { id: "measures", label: "Medidas y Alertas", icon: AlertOctagon },
       { id: "documents", label: "Documentos", icon: FileText },
     ]
   },
@@ -215,6 +358,9 @@ const ADMIN_MENU: { id: View; label: string; icon: any }[] = [
   { id: "catalogs", label: "Catálogos", icon: BookOpen },
   { id: "settings", label: "Configuración", icon: Settings },
 ];
+
+const ADMIN_ONLY_VIEWS: View[] = ["users", "audit", "catalogs", "settings", "analytics"];
+const isAdminRole = (role: string) => role.toLowerCase() === "administrador";
 
 // ─── Reusable UI ─────────────────────────────────────────────────────────────
 
@@ -244,8 +390,8 @@ function KPICard({ label, value, delta, icon: Icon, bg, fg, sub }: {
 }) {
   const up = delta?.startsWith("+");
   return (
-    <div className="bg-card border border-border rounded-lg p-5 flex flex-col gap-4 hover:shadow-sm transition-shadow">
-      <div className="flex items-start justify-between">
+    <div className="bg-card border border-border rounded-lg p-5 flex flex-col gap-4 hover:shadow-sm transition-shadow text-center items-center justify-center min-h-[145px]">
+      <div className="flex items-center justify-center">
         <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${bg} ${fg}`}>
           <Icon size={17} />
         </div>
@@ -256,7 +402,7 @@ function KPICard({ label, value, delta, icon: Icon, bg, fg, sub }: {
           </span>
         )}
       </div>
-      <div>
+      <div className="flex flex-col items-center">
         <div className="text-[26px] font-bold font-mono text-foreground leading-none">{value.toLocaleString()}</div>
         <div className="text-sm text-muted-foreground mt-1.5">{label}</div>
         {sub && <div className="text-[11px] text-muted-foreground/60 mt-0.5 font-mono">{sub}</div>}
@@ -265,7 +411,7 @@ function KPICard({ label, value, delta, icon: Icon, bg, fg, sub }: {
   );
 }
 
-function SectionHeader({ title, sub, action }: { title: string; sub?: string; action?: React.ReactNode }) {
+function SectionHeader({ title, sub, action }: { title: string; sub?: string; action?: ReactNode }) {
   return (
     <div className="flex items-start justify-between mb-6">
       <div className="flex-1 min-w-0 pr-4">
@@ -293,7 +439,7 @@ function SectionHeader({ title, sub, action }: { title: string; sub?: string; ac
 }
 
 function Btn({ children, variant = "primary", size = "md", onClick, icon: Icon }: {
-  children?: React.ReactNode; variant?: "primary" | "secondary" | "ghost" | "danger";
+  children?: ReactNode; variant?: "primary" | "secondary" | "ghost" | "danger";
   size?: "sm" | "md"; onClick?: () => void; icon?: any;
 }) {
   const base = "inline-flex items-center gap-2 font-medium rounded-md transition-colors cursor-pointer select-none";
@@ -375,7 +521,7 @@ function SearchBar({ placeholder }: { placeholder?: string }) {
   );
 }
 
-function Table({ headers, rows }: { headers: string[]; rows: React.ReactNode[][] }) {
+function Table({ headers, rows }: { headers: string[]; rows: ReactNode[][] }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -400,13 +546,18 @@ function Table({ headers, rows }: { headers: string[]; rows: React.ReactNode[][]
   );
 }
 
-function Pagination() {
+function Pagination({ total, pageSize = 7, currentPage = 1 }: { total: number; pageSize?: number; currentPage?: number }) {
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(currentPage, 1), pageCount);
+  const start = total === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const end = Math.min(total, safePage * pageSize);
+  const pages = Array.from({ length: Math.min(pageCount, 5) }, (_, i) => i + 1);
   return (
     <div className="flex items-center justify-between pt-4 border-t border-border">
-      <span className="text-xs text-muted-foreground font-mono">Mostrando 1–7 de 1,847 registros</span>
+      <span className="text-xs text-muted-foreground font-mono">Mostrando {start}-{end} de {total} registros</span>
       <div className="flex items-center gap-1">
-        {["«", "‹", "1", "2", "3", "...", "263", "›", "»"].map((p, i) => (
-          <button key={i} className={`px-2.5 py-1 rounded text-xs font-mono border transition-colors ${p === "1" ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-muted"}`}>
+        {["«", "‹", ...pages.map(String), ...(pageCount > 5 ? ["...", String(pageCount)] : []), "›", "»"].map((p, i) => (
+          <button key={i} className={`px-2.5 py-1 rounded text-xs font-mono border transition-colors ${p === String(safePage) ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-muted"}`}>
             {p}
           </button>
         ))}
@@ -424,12 +575,169 @@ function ChipFilter({ label, active, onClick }: { label: string; active?: boolea
   );
 }
 
+function LoginPage({ onLogin }: { onLogin: (user: SessionUser, remember: boolean) => void }) {
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [remember, setRemember] = useState(true);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetIdentifier, setResetIdentifier] = useState("");
+  const [resetMessage, setResetMessage] = useState("");
+
+  const submitLogin = async (event: FormEvent) => {
+    event.preventDefault();
+    setError("");
+    setLoading(true);
+
+    const email = toInstitutionalEmail(identifier);
+    const { data, error: loginError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    setLoading(false);
+
+    if (loginError || !data.user) {
+      setError("Usuario, correo institucional o contraseña incorrectos.");
+      return;
+    }
+
+    onLogin(sessionUserFromAuthUser(data.user), remember);
+  };
+
+  const sendPasswordReset = async () => {
+    const email = toInstitutionalEmail(resetIdentifier || identifier);
+    if (!email.trim()) {
+      setResetMessage("Digite su correo institucional o usuario para continuar.");
+      return;
+    }
+
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin,
+    });
+
+    setResetMessage(resetError
+      ? "No se pudo enviar la recuperación. Verifique el correo o la configuración de Supabase Auth."
+      : "Solicitud enviada. Revise el correo institucional para restablecer la contraseña."
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-[#f4f7fb] flex items-center justify-center p-4" style={{ fontFamily: "'Inter', sans-serif" }}>
+      <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-[1.05fr_0.95fr] bg-white border border-slate-200 shadow-xl rounded-lg overflow-hidden">
+        <div className="bg-[#0b1730] text-white p-8 lg:p-10 flex flex-col items-center justify-center text-center min-h-[560px]">
+          <img src={mpWhiteLogo} alt="Ministerio Público" className="h-40 w-auto object-contain" />
+          <div className="mt-10">
+            <h1 className="text-3xl font-semibold leading-tight" style={{ fontFamily: "'Crimson Pro', serif" }}>UCAPREC</h1>
+            <p className="mt-4 text-sm leading-6 text-blue-100 max-w-md">
+              Unidad de Captura de Prófugos, Rebeldes y Condenados.
+            </p>
+          </div>
+        </div>
+
+        <div className="p-8 lg:p-10 flex flex-col justify-center">
+          <div className="mb-8">
+            <h2 className="text-2xl font-semibold text-slate-950">Iniciar sesión</h2>
+            <p className="text-sm text-slate-500 mt-2">Ingrese con su correo institucional o usuario asignado.</p>
+          </div>
+
+          <form onSubmit={submitLogin} className="space-y-5">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">Correo institucional o usuario</label>
+              <div className="relative">
+                <UserCheck size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={identifier}
+                  onChange={event => setIdentifier(event.target.value)}
+                  autoComplete="username"
+                  className="w-full pl-10 pr-3 py-2.5 text-sm border border-slate-300 rounded-md outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
+                  placeholder="michael.custodio@pgr.gob.do"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">Contraseña</label>
+              <div className="relative">
+                <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={event => setPassword(event.target.value)}
+                  autoComplete="current-password"
+                  className="w-full pl-10 pr-11 py-2.5 text-sm border border-slate-300 rounded-md outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
+                  placeholder="Ingrese su contraseña"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(value => !value)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                  title={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                >
+                  <Eye size={16} />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)} className="h-4 w-4 rounded border-slate-300" />
+                Recordar sesión
+              </label>
+              <button type="button" onClick={() => { setResetOpen(true); setResetIdentifier(identifier); setResetMessage(""); }} className="text-sm text-blue-700 hover:underline">Recuperar acceso</button>
+            </div>
+
+            {error && (
+              <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                <AlertTriangle size={15} className="mt-0.5 flex-shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <button type="submit" disabled={loading} className="w-full inline-flex items-center justify-center gap-2 rounded-md bg-[#1a3a6e] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#12315f] transition-colors disabled:opacity-60 disabled:cursor-not-allowed">
+              <Lock size={15} />
+              {loading ? "Validando acceso..." : "Entrar al sistema"}
+            </button>
+          </form>
+
+        </div>
+      </div>
+      {resetOpen && (
+        <div className="fixed inset-0 bg-black/45 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-2xl border border-slate-200 w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-slate-950">Recuperar acceso</h3>
+              <button onClick={() => setResetOpen(false)} className="text-slate-400 hover:text-slate-700"><X size={16} /></button>
+            </div>
+            <p className="text-sm text-slate-500 mb-4">Digite su correo institucional o usuario. El sistema registrará la solicitud para restablecer la contraseña.</p>
+            <input value={resetIdentifier} onChange={event => setResetIdentifier(event.target.value)} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600" placeholder="correo@pgr.gob.do o usuario" />
+            {resetMessage && <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{resetMessage}</div>}
+            <div className="flex justify-end gap-2 mt-5">
+              <button onClick={() => setResetOpen(false)} className="px-3 py-2 rounded-md border border-slate-300 text-sm text-slate-600 hover:bg-slate-50">Cancelar</button>
+              <button onClick={sendPasswordReset} className="px-3 py-2 rounded-md bg-[#1a3a6e] text-sm font-semibold text-white hover:bg-[#12315f]">Enviar solicitud</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 
-function Sidebar({ view, setView, navigateModule, collapsed, setCollapsed }: {
+function Sidebar({ view, setView, navigateModule, collapsed, setCollapsed, currentUser, onLogout, canAccessAdmin, reviewCount }: {
   view: View; setView: (v: View) => void; navigateModule: (v: View) => void;
-  collapsed: boolean; setCollapsed: (b: boolean) => void;
+  collapsed: boolean; setCollapsed: (b: boolean) => void; currentUser: SessionUser; onLogout: () => void; canAccessAdmin: boolean; reviewCount: number;
 }) {
+  const visibleNav = useMemo(() => NAV.map(group => ({
+    ...group,
+    items: group.items
+      .filter(item => canAccessAdmin || !ADMIN_ONLY_VIEWS.includes(item.id))
+      .map(item => item.id === "cases" && reviewCount > 0 ? { ...item, badge: reviewCount } : item),
+  })).filter(group => group.items.length > 0), [canAccessAdmin, reviewCount]);
+
   return (
     <aside className={`flex flex-col h-screen bg-sidebar border-r border-sidebar-border transition-all duration-200 ${collapsed ? "w-[60px]" : "w-[220px]"} flex-shrink-0 overflow-hidden`}>
       {/* Logo */}
@@ -439,16 +747,16 @@ function Sidebar({ view, setView, navigateModule, collapsed, setCollapsed }: {
             <Scale size={15} className="text-white" />
           </div>
         ) : (
-          <div className="flex flex-col gap-0.5 min-w-0">
-            <img src={mpLogo} alt="Ministerio Público" className="h-25 w-auto object-contain object-left -mb-1" />
-            <div className="text-[11px] text-blue-300/60 tracking-[0.16em] uppercase font-semibold pl-0.5 -mt-1">UCAPREC</div>
+          <div className="flex flex-col items-center gap-0.5 min-w-0 w-full">
+            <img src={mpLogo} alt="Ministerio Público" className="h-25 w-auto object-contain -mb-1 mx-auto" />
+            <div className="text-[11px] text-blue-300/60 tracking-[0.16em] uppercase font-semibold -mt-1 text-center w-full">UCAPREC</div>
           </div>
         )}
       </div>
 
       {/* Nav */}
       <nav className="flex-1 overflow-hidden py-1.5 px-2 space-y-2">
-        {NAV.map(group => (
+        {visibleNav.map(group => (
           <div key={group.label}>
             {!collapsed && (
               <div className="text-[8px] font-bold uppercase tracking-[0.18em] text-sidebar-foreground/40 px-2 mb-0.5">{group.label}</div>
@@ -492,12 +800,14 @@ function Sidebar({ view, setView, navigateModule, collapsed, setCollapsed }: {
         </button>
         {!collapsed && (
           <div className="flex items-center gap-2 px-2 py-1.5 rounded-md">
-            <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0">RH</div>
+            <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0">{currentUser.initials}</div>
             <div className="flex-1 min-w-0">
-              <div className="text-[12px] font-medium text-white truncate">Roberto Herrera</div>
-              <div className="text-[9px] text-sidebar-foreground/50">Administrador</div>
+              <div className="text-[12px] font-medium text-white truncate">{currentUser.name}</div>
+              <div className="text-[9px] text-sidebar-foreground/50">{currentUser.role}</div>
             </div>
-            <LogOut size={12} className="text-sidebar-foreground/40 hover:text-white cursor-pointer flex-shrink-0" />
+            <button onClick={onLogout} title="Cerrar sesión" className="text-sidebar-foreground/40 hover:text-white flex-shrink-0">
+              <LogOut size={12} />
+            </button>
           </div>
         )}
       </div>
@@ -518,10 +828,11 @@ function TopBar({
   breadcrumb,
   openCaseFromNotification,
   openNotificationsCenter,
+  canAccessAdmin,
 }: {
   title: string; dark: boolean; setDark: (b: boolean) => void; setView: (v: View) => void;
   navigateModule: (v: View) => void; goBack: () => void; canGoBack: boolean; breadcrumb: View[];
-  openCaseFromNotification: (caseId: string) => void; openNotificationsCenter: () => void;
+  openCaseFromNotification: (caseId: string) => void; openNotificationsCenter: () => void; canAccessAdmin: boolean;
 }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
@@ -560,14 +871,6 @@ function TopBar({
 
       {/* Right: search, notifications, dark mode, admin menu */}
       <div className="flex items-center gap-2 flex-shrink-0">
-        <div className="relative hidden sm:block">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-300/60" />
-          <input
-            className="pl-8 pr-3 py-1.5 text-sm bg-white/10 border border-white/15 rounded-md outline-none focus:ring-1 focus:ring-white/30 w-52 text-white placeholder:text-blue-200/50"
-            placeholder="Búsqueda rápida…"
-          />
-        </div>
-
         {/* Notifications */}
         <div className="relative">
           <button
@@ -578,7 +881,7 @@ function TopBar({
             className="relative w-8 h-8 flex items-center justify-center rounded-md text-blue-200 hover:text-white hover:bg-white/10 transition-colors"
           >
             <Bell size={16} />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
+            {systemAlerts.length > 0 && <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />}
           </button>
           {notifOpen && (
             <div className="absolute right-0 top-11 w-80 bg-card border border-border rounded-lg shadow-xl z-50 overflow-hidden">
@@ -587,7 +890,11 @@ function TopBar({
                 <button onClick={() => setNotifOpen(false)}><X size={14} className="text-muted-foreground" /></button>
               </div>
               <div className="divide-y divide-border max-h-72 overflow-y-auto">
-                {systemAlerts.map((a) => {
+                {systemAlerts.length === 0 ? (
+                  <div className="px-4 py-8 text-center text-xs text-muted-foreground">
+                    No hay notificaciones pendientes.
+                  </div>
+                ) : systemAlerts.map((a) => {
                   const colors = { danger: "text-red-600", warning: "text-amber-600", info: "text-blue-600", success: "text-emerald-600" };
                   const icons = { danger: AlertOctagon, warning: AlertTriangle, info: Info, success: CheckCircle };
                   const Icon = icons[a.type as keyof typeof icons];
@@ -638,7 +945,7 @@ function TopBar({
         </button>
 
         {/* Admin menu - right */}
-        <div className="relative">
+        {canAccessAdmin && <div className="relative">
           <button
             onClick={() => {
               setAdminMenuOpen(!adminMenuOpen);
@@ -674,7 +981,7 @@ function TopBar({
               </div>
             </div>
           )}
-        </div>
+        </div>}
       </div>
     </header>
   );
@@ -859,42 +1166,228 @@ function exportDashboardPDF() {
 }
 
 function DashboardView({ setView }: { setView: (v: View) => void }) {
-  const totalImputados = defendants.length;
+const [dashboardKpis, setDashboardKpis] = useState<null | {
+  expedientes_totales: number
+  imputados_totales: number
+  profugos_activos: number
+  en_rebeldia: number
+  expedientes_en_revision: number
+  alertas_rojas: number
+  alertas_migratorias: number
+  ordenes_arresto: number
+  subidos_a_pn: number
+}>(null)
+const [dashboardCases, setDashboardCases] = useState<typeof recentCases>([])
+const [dashboardExportRows, setDashboardExportRows] = useState<(string | number)[][]>([])
+const [dashboardEvolution, setDashboardEvolution] = useState<Array<{ mes: string; casos: number }>>([])
+const [dashboardStatusPie, setDashboardStatusPie] = useState<Array<{ name: string; value: number; color: string }>>([])
+const [dashboardDistricts, setDashboardDistricts] = useState<Array<{ name: string; casos: number }>>([])
+const [dashboardAlertsByMonth, setDashboardAlertsByMonth] = useState<Array<{ mes: string; roja: number; migratoria: number; arresto: number }>>([])
+const [showFilters, setShowFilters] = useState(false)
+const [dashboardRefresh, setDashboardRefresh] = useState(0)
+const [filters, setFilters] = useState({
+  desde: "",
+  hasta: "",
+  estadoRegistro: "Todos",
+  estadoImputado: "Todos",
+  tipo: "Todos",
+  delito: "Todos",
+  alerta: "Todos",
+  texto: "",
+})
+
+  const clearDashboardFilters = () => setFilters({
+    desde: "",
+    hasta: "",
+    estadoRegistro: "Todos",
+    estadoImputado: "Todos",
+    tipo: "Todos",
+    delito: "Todos",
+    alerta: "Todos",
+    texto: "",
+  })
+
+  const dashboardHasFilters = Object.values(filters).some(value => value !== "" && value !== "Todos")
+
+  useEffect(() => {
+    let active = true
+
+    const loadDashboard = async () => {
+      let casesQuery = supabase
+      .from("expedientes")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(5000)
+
+      if (filters.desde) casesQuery = casesQuery.gte("fecha_recepcion", filters.desde)
+      if (filters.hasta) casesQuery = casesQuery.lte("fecha_recepcion", filters.hasta)
+      if (filters.estadoRegistro !== "Todos") casesQuery = casesQuery.eq("estado_registro", filters.estadoRegistro)
+      if (filters.estadoImputado !== "Todos") casesQuery = casesQuery.eq("estado_imputado", filters.estadoImputado)
+      if (filters.tipo !== "Todos") casesQuery = casesQuery.eq("tipo_expediente", filters.tipo)
+      if (filters.delito !== "Todos") casesQuery = casesQuery.eq("delito_principal", filters.delito)
+      if (filters.texto.trim()) {
+        const q = filters.texto.trim()
+        casesQuery = casesQuery.or(`numero_expediente.ilike.%${q}%,numero_sentencia.ilike.%${q}%,imputado_principal.ilike.%${q}%,delito_principal.ilike.%${q}%`)
+      }
+
+      const { data: caseRows, error: caseError } = await casesQuery
+      if (!active) return
+      if (caseError) {
+        console.error("Error cargando indicadores del dashboard:", caseError)
+        setDashboardKpis(null)
+        setDashboardCases([])
+        setDashboardExportRows([])
+        return
+      }
+
+      const cases = (caseRows ?? []).map(mapExpedienteRow)
+      const filteredCases = filters.alerta === "Todos" ? cases : cases.filter(c => c.alerta === filters.alerta)
+      const caseIds = new Set(filteredCases.map(c => c.id))
+      const { data: defendantRows } = await supabase.from("imputados").select("*").limit(5000)
+      const defendantsForCases = (defendantRows ?? []).map(mapImputadoRow).filter(d => caseIds.has(d.exp))
+      const rawFilteredRows = (caseRows ?? []).filter(row => caseIds.has(mapExpedienteRow(row, 0).id))
+      const countMap = <T extends string>(items: T[]) => items.reduce<Record<string, number>>((acc, item) => {
+        const key = item || "Sin dato"
+        acc[key] = (acc[key] ?? 0) + 1
+        return acc
+      }, {})
+      const byMonth = countMap(rawFilteredRows.map(row => monthLabel(firstText(row.fecha_recepcion, row.created_at, row.fecha_registro))))
+      const byDistrict = countMap(rawFilteredRows.map(row => firstText(row.jurisdiccion, row.localidad_jurisdiccion, row.provincia, "Sin jurisdicción")))
+      const statusCounts = countMap(defendantsForCases.map(d => d.estatus || "Sin estatus"))
+      const colors: Record<string, string> = { "Prófugo": "#B91C1C", "Rebeldía": "#D97706", "Recluido": "#059669", "Absuelto": "#94A3B8", "Sin estatus": "#64748B" }
+      const alertMonths = Object.entries(byMonth).map(([mes]) => {
+        const monthRows = rawFilteredRows.filter(row => monthLabel(firstText(row.fecha_recepcion, row.created_at, row.fecha_registro)) === mes)
+        const monthCases = monthRows.map(row => mapExpedienteRow(row, 0))
+        return {
+          mes,
+          roja: monthCases.filter(c => c.alerta === "Roja").length,
+          migratoria: monthCases.filter(c => c.alerta === "Migratoria").length,
+          arresto: defendantsForCases.filter(d => d.ordenArresto && monthCases.some(c => c.id === d.exp)).length,
+        }
+      })
+
+      setDashboardKpis({
+        expedientes_totales: filteredCases.length,
+        imputados_totales: defendantsForCases.length,
+        profugos_activos: filteredCases.filter(c => c.estatus === "Prófugo").length,
+        en_rebeldia: filteredCases.filter(c => c.estatus === "Rebeldía").length,
+        expedientes_en_revision: filteredCases.filter(c => c.estReg === "En Revisión").length,
+        alertas_rojas: filteredCases.filter(c => c.alerta === "Roja").length,
+        alertas_migratorias: filteredCases.filter(c => c.alerta === "Migratoria").length,
+        ordenes_arresto: defendantsForCases.filter(d => d.ordenArresto).length,
+        subidos_a_pn: defendantsForCases.filter(d => d.policia).length,
+      })
+      setDashboardCases(filteredCases.slice(0, 5))
+      setDashboardExportRows(filteredCases.map(c => [c.id, c.sentencia, c.imputado, c.delito, c.tipo, c.estatus, c.alerta, c.estReg, c.asignado, c.fecha]))
+      setDashboardEvolution(Object.entries(byMonth).map(([mes, casos]) => ({ mes, casos })))
+      setDashboardStatusPie(Object.entries(statusCounts).map(([name, value]) => ({ name, value, color: colors[name] ?? "#1D4ED8" })))
+      setDashboardDistricts(Object.entries(byDistrict).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, casos]) => ({ name, casos })))
+      setDashboardAlertsByMonth(alertMonths)
+    }
+
+    loadDashboard()
+
+    return () => {
+      active = false
+    }
+  }, [filters, dashboardRefresh])
+
+const dashboardValues = {
+  expedientesTotales: dashboardKpis?.expedientes_totales ?? 0,
+  imputadosTotales: dashboardKpis?.imputados_totales ?? 0,
+  profugosActivos: dashboardKpis?.profugos_activos ?? 0,
+  enRebeldia: dashboardKpis?.en_rebeldia ?? 0,
+  pendientesRevision: dashboardKpis?.expedientes_en_revision ?? 0,
+  alertasRojas: dashboardKpis?.alertas_rojas ?? 0,
+  alertasMigratorias: dashboardKpis?.alertas_migratorias ?? 0,
+  ordenesArresto: dashboardKpis?.ordenes_arresto ?? 0,
+  subidosPN: dashboardKpis?.subidos_a_pn ?? 0,
+}
+
   return (
+
     <div className="p-6 space-y-6">
       <SectionHeader
         title="Estadísticas Sobre la Unidad de Captura de Prófugos, Rebeldes y Condenados (UCAPREC)"
-        sub="Resumen operativo actualizado al 28 de noviembre de 2024"
+        sub={`Resumen operativo actualizado al ${todayLong()}`}
         action={
           <div className="flex gap-2">
-            <Btn variant="secondary" icon={RefreshCw} size="sm" onClick={() => window.location.reload()}>Actualizar</Btn>
-            <Btn variant="secondary" icon={Printer} size="sm" onClick={exportDashboardPDF}>Exportar PDF</Btn>
+            <Btn variant={showFilters ? "primary" : "secondary"} icon={Filter} size="sm" onClick={() => setShowFilters(value => !value)}>Filtros</Btn>
+            <Btn variant="secondary" icon={RefreshCw} size="sm" onClick={() => { clearDashboardFilters(); setDashboardRefresh(value => value + 1); }}>Actualizar</Btn>
+            <Btn variant="secondary" icon={FileSpreadsheet} size="sm" onClick={() => downloadExcel(
+              ["Expediente", "No. Sentencia", "Imputado", "Delito", "Tipo", "Estatus", "Alerta", "Estado Reg.", "Asignado", "Fecha"],
+              dashboardExportRows,
+              "dashboard_filtrado.xls"
+            )}>Exportar Excel</Btn>
+            <Btn variant="secondary" icon={Printer} size="sm" onClick={triggerPrint}>Exportar PDF</Btn>
           </div>
         }
       />
 
+      {showFilters && (
+        <div className="bg-card border border-border rounded-lg p-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="relative lg:col-span-2">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input value={filters.texto} onChange={e => setFilters(p => ({ ...p, texto: e.target.value }))} className="w-full pl-8 pr-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground" placeholder="Buscar por expediente, sentencia, imputado o delito" />
+            </div>
+            <input type="date" value={filters.desde} onChange={e => setFilters(p => ({ ...p, desde: e.target.value }))} className="px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground" />
+            <input type="date" value={filters.hasta} onChange={e => setFilters(p => ({ ...p, hasta: e.target.value }))} className="px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground" />
+            <select value={filters.estadoRegistro} onChange={e => setFilters(p => ({ ...p, estadoRegistro: e.target.value }))} className="px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground">
+              <option value="Todos">Estado de registro: Todos</option>
+              {ESTADOS_REGISTRO.map(x => <option key={x} value={x}>{x}</option>)}
+            </select>
+            <select value={filters.estadoImputado} onChange={e => setFilters(p => ({ ...p, estadoImputado: e.target.value }))} className="px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground">
+              <option value="Todos">Estatus imputado: Todos</option>
+              {ESTADOS_IMPUTADO.map(x => <option key={x} value={x}>{x}</option>)}
+            </select>
+            <select value={filters.tipo} onChange={e => setFilters(p => ({ ...p, tipo: e.target.value }))} className="px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground">
+              <option value="Todos">Tipo: Todos</option>
+              {TIPOS_EXPEDIENTE.map(x => <option key={x} value={x}>{x}</option>)}
+            </select>
+            <select value={filters.delito} onChange={e => setFilters(p => ({ ...p, delito: e.target.value }))} className="px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground">
+              <option value="Todos">Delito: Todos</option>
+              {INFRACCIONES.map(x => <option key={x} value={x}>{x}</option>)}
+            </select>
+            <select value={filters.alerta} onChange={e => setFilters(p => ({ ...p, alerta: e.target.value }))} className="px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground">
+              <option value="Todos">Alerta: Todas</option>
+              <option value="Roja">Roja</option>
+              <option value="Migratoria">Migratoria</option>
+              <option value="Arresto">Arresto</option>
+              <option value="—">Sin alerta</option>
+            </select>
+          </div>
+          {dashboardHasFilters && (
+            <div className="mt-3 pt-3 border-t border-border flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">{dashboardValues.expedientesTotales} expediente(s) según filtros aplicados</span>
+              <button onClick={clearDashboardFilters} className="text-xs text-primary hover:underline flex items-center gap-1"><X size={10} /> Limpiar filtros</button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-        <KPICard label="Expedientes Totales" value={KPI.total} delta="+47 este mes"
-          icon={FolderOpen} bg="bg-blue-50 dark:bg-blue-900/20" fg="text-blue-700 dark:text-blue-400" sub="Desde 1990 a la fecha" />
-        <KPICard label="Imputados Totales" value={totalImputados}
-          icon={Users} bg="bg-sky-50 dark:bg-sky-900/20" fg="text-sky-700 dark:text-sky-400" sub="Registros cargados actualmente" />
-        <KPICard label="Prófugos Activos" value={KPI.profugos} delta="+8 este mes"
+        <KPICard label="Expedientes Totales" value={dashboardValues.expedientesTotales}
+          icon={FolderOpen} bg="bg-blue-50 dark:bg-blue-900/20" fg="text-blue-700 dark:text-blue-400" />
+        <KPICard label="Imputados Totales" value={dashboardValues.imputadosTotales}
+          icon={Users} bg="bg-sky-50 dark:bg-sky-900/20" fg="text-sky-700 dark:text-sky-400" />
+        <KPICard label="Prófugos Activos" value={dashboardValues.profugosActivos}
           icon={UserX} bg="bg-red-50 dark:bg-red-900/20" fg="text-red-700 dark:text-red-400" />
-        <KPICard label="En Rebeldía" value={KPI.rebeldes} delta="-3 este mes"
+        <KPICard label="En Rebeldía" value={dashboardValues.enRebeldia}
           icon={Gavel} bg="bg-amber-50 dark:bg-amber-900/20" fg="text-amber-700 dark:text-amber-400" />
-        <KPICard label="Pendiente Revisión" value={KPI.pendReview}
+        <KPICard label="Pendiente Revisión" value={dashboardValues.pendientesRevision}
           icon={Clock} bg="bg-orange-50 dark:bg-orange-900/20" fg="text-orange-700 dark:text-orange-400" sub="Sin verificar >7 días" />
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <KPICard label="Alertas Rojas" value={KPI.alertaRoja} delta="+22 este mes"
+        <KPICard label="Alertas Rojas" value={dashboardValues.alertasRojas}
           icon={AlertOctagon} bg="bg-red-50 dark:bg-red-900/20" fg="text-red-700 dark:text-red-400" />
-        <KPICard label="Alertas Migratorias" value={KPI.alertaMig} delta="+35 este mes"
+        <KPICard label="Alertas Migratorias" value={dashboardValues.alertasMigratorias}
           icon={Globe} bg="bg-indigo-50 dark:bg-indigo-900/20" fg="text-indigo-700 dark:text-indigo-400" />
-        <KPICard label="Órdenes de Arresto" value={KPI.ordenArresto} delta="+48 este mes"
+        <KPICard label="Órdenes de Arresto" value={dashboardValues.ordenesArresto}
           icon={Lock} bg="bg-violet-50 dark:bg-violet-900/20" fg="text-violet-700 dark:text-violet-400" />
-        <KPICard label="Subidos a PN" value={284} delta="+31 este mes"
+        <KPICard label="Subidos a PN" value={dashboardValues.subidosPN}
           icon={UserCheck} bg="bg-teal-50 dark:bg-teal-900/20" fg="text-teal-700 dark:text-teal-400" />
       </div>
 
@@ -903,13 +1396,13 @@ function DashboardView({ setView }: { setView: (v: View) => void }) {
         <div className="lg:col-span-2 bg-card border border-border rounded-lg p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="font-semibold text-foreground text-sm">Recepción de Casos — 2024</h3>
+              <h3 className="font-semibold text-foreground text-sm">Recepción de Casos — {new Date().getFullYear()}</h3>
               <p className="text-xs text-muted-foreground">Nuevos expedientes por mes</p>
             </div>
             <TrendingUp size={16} className="text-muted-foreground" />
           </div>
           <ResponsiveContainer width="100%" height={180}>
-            <AreaChart data={evolutionData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+            <AreaChart data={dashboardEvolution} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
               <defs>
                 <linearGradient id="casosGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#1D4ED8" stopOpacity={0.2} />
@@ -932,14 +1425,14 @@ function DashboardView({ setView }: { setView: (v: View) => void }) {
           </div>
           <ResponsiveContainer width="100%" height={160}>
             <PieChart>
-              <Pie data={statusPieData} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={3} dataKey="value">
-                {statusPieData.map((entry) => <Cell key={`status-${entry.name}`} fill={entry.color} />)}
+              <Pie data={dashboardStatusPie} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={3} dataKey="value">
+                {dashboardStatusPie.map((entry) => <Cell key={`status-${entry.name}`} fill={entry.color} />)}
               </Pie>
               <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }} />
             </PieChart>
           </ResponsiveContainer>
           <div className="space-y-1.5 mt-2">
-            {statusPieData.map((item, i) => (
+            {dashboardStatusPie.map((item, i) => (
               <div key={i} className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
                   <div className="w-2.5 h-2.5 rounded-sm" style={{ background: item.color }} />
@@ -962,7 +1455,7 @@ function DashboardView({ setView }: { setView: (v: View) => void }) {
             </div>
           </div>
           <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={districtData} layout="vertical" margin={{ left: 10, right: 10, top: 0, bottom: 0 }}>
+            <BarChart data={dashboardDistricts} layout="vertical" margin={{ left: 10, right: 10, top: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
               <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
@@ -980,7 +1473,7 @@ function DashboardView({ setView }: { setView: (v: View) => void }) {
             <p className="text-xs text-muted-foreground">Evolución de alertas activas</p>
           </div>
           <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={alertsByMonthData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+            <BarChart data={dashboardAlertsByMonth} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="mes" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
@@ -1019,7 +1512,13 @@ function DashboardView({ setView }: { setView: (v: View) => void }) {
                 </tr>
               </thead>
               <tbody>
-                {recentCases.slice(0, 5).map((c, i) => (
+                {dashboardCases.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
+                      No hay expedientes recientes registrados.
+                    </td>
+                  </tr>
+                ) : dashboardCases.map((c, i) => (
                   <tr key={i} className="border-b border-border/50 hover:bg-muted/20 transition-colors cursor-pointer">
                     <td className="py-2.5 px-4 font-mono text-[10px] text-primary">{c.id}</td>
                     <td className="py-2.5 px-4 text-foreground max-w-[120px] truncate">{c.imputado}</td>
@@ -1039,7 +1538,11 @@ function DashboardView({ setView }: { setView: (v: View) => void }) {
             <h3 className="font-semibold text-foreground text-sm">Actividad Reciente</h3>
           </div>
           <div className="divide-y divide-border">
-            {systemAlerts.map((a, i) => {
+            {systemAlerts.length === 0 ? (
+              <div className="px-5 py-10 text-center text-sm text-muted-foreground">
+                No hay actividad reciente registrada.
+              </div>
+            ) : systemAlerts.map((a, i) => {
               const colorMap = { danger: "text-red-600", warning: "text-amber-600", info: "text-blue-500", success: "text-emerald-600" };
               const iconMap = { danger: AlertOctagon, warning: AlertTriangle, info: Info, success: CheckCircle };
               const Icon = iconMap[a.type as keyof typeof iconMap];
@@ -1062,7 +1565,7 @@ function DashboardView({ setView }: { setView: (v: View) => void }) {
 
 // ─── Cases View ───────────────────────────────────────────────────────────────
 
-function CasesView({ setView }: { setView: (v: View) => void }) {
+function CasesView({ setView, openCase }: { setView: (v: View) => void; openCase: (caseId: string, mode?: "detail" | "form") => void }) {
   const [search, setSearch] = useState("");
   const [filterRecordStatus, setFilterRecordStatus] = useState("Todos");
   const [filterStatus, setFilterStatus] = useState("Todos");
@@ -1071,8 +1574,31 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
   const [filterAnalista, setFilterAnalista] = useState("Todos");
   const [filterDesde, setFilterDesde] = useState("");
   const [filterHasta, setFilterHasta] = useState("");
-  const [cases, setCases] = useState(recentCases);
+  const [cases, setCases] = useState<typeof recentCases>([]);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    supabase
+      .from("expedientes")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(500)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error("Error cargando expedientes:", error);
+          setCases([]);
+          return;
+        }
+        setCases((data ?? []).map(mapExpedienteRow));
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -1102,11 +1628,20 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
   const attentionCount = cases.filter(c => c.estReg === "En Revisión").length;
 
   const confirmDelete = (id: string) => setDeleteId(id);
-  const doDelete = () => {
-    if (deleteId) {
-      setCases(prev => prev.filter(c => c.id !== deleteId));
-      setDeleteId(null);
+  const doDelete = async () => {
+    if (!deleteId) return;
+    const { error } = await supabase
+      .from("expedientes")
+      .delete()
+      .eq("numero_expediente", deleteId);
+
+    if (error) {
+      console.error("Error eliminando expediente:", error);
+      return;
     }
+
+    setCases(prev => prev.filter(c => c.id !== deleteId));
+    setDeleteId(null);
   };
 
   const clearFilters = () => {
@@ -1197,10 +1732,10 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
           </div>
 
           <div className="flex gap-2 ml-auto">
-            <Btn variant="secondary" icon={Download} size="sm" onClick={() => downloadCSV(
+            <Btn variant="secondary" icon={Download} size="sm" onClick={() => downloadExcel(
               ["Expediente", "No. Sentencia", "Imputado", "Delito", "Estatus", "Alerta", "Estado Reg.", "Asignado", "Fecha"],
               filtered.map(c => [c.id, c.sentencia, c.imputado, c.delito, c.estatus, c.alerta, c.estReg, c.asignado, c.fecha]),
-              "expedientes.csv"
+              "expedientes.xls"
             )}>Exportar Excel</Btn>
             <Btn variant="secondary" icon={Printer} size="sm" onClick={triggerPrint}>Imprimir</Btn>
           </div>
@@ -1278,7 +1813,7 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
           <Table
             headers={["Expediente", "No. Sentencia", "Imputado Principal", "Delito", "Estatus", "Alerta", "Estado Reg.", "Asignado", "Fecha", "Acciones"]}
             rows={filtered.map(c => [
-              <span className="font-mono text-xs text-primary cursor-pointer hover:underline" onClick={() => setView("case-detail")}>{c.id}</span>,
+              <span className="font-mono text-xs text-primary cursor-pointer hover:underline" onClick={() => openCase(c.id)}>{c.id}</span>,
               <span className="font-mono text-xs text-muted-foreground">{c.sentencia}</span>,
               <span className="text-sm">{c.imputado}</span>,
               <span className="text-xs text-muted-foreground">{c.delito}</span>,
@@ -1288,8 +1823,8 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
               <span className="text-xs text-muted-foreground">{c.asignado}</span>,
               <span className="font-mono text-xs text-muted-foreground">{c.fecha}</span>,
               <div className="flex gap-1">
-                <button title="Ver detalle" className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" onClick={() => setView("case-detail")}><Eye size={13} /></button>
-                <button title="Editar expediente" className="p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 text-muted-foreground hover:text-blue-600 transition-colors" onClick={() => setView("case-form")}><Edit2 size={13} /></button>
+                <button title="Ver detalle" className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" onClick={() => openCase(c.id)}><Eye size={13} /></button>
+                <button title="Editar expediente" className="p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 text-muted-foreground hover:text-blue-600 transition-colors" onClick={() => openCase(c.id, "form")}><Edit2 size={13} /></button>
                 <button title="Eliminar expediente" className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-600 transition-colors" onClick={() => confirmDelete(c.id)}><Trash2 size={13} /></button>
               </div>
             ])}
@@ -1298,7 +1833,7 @@ function CasesView({ setView }: { setView: (v: View) => void }) {
         <div className="px-4 pb-4 border-t border-border">
           <div className="flex items-center justify-between pt-3">
             <span className="text-xs text-muted-foreground font-mono">{filtered.length} resultado(s)</span>
-            <Pagination />
+            <Pagination total={filtered.length} />
           </div>
         </div>
       </div>
@@ -1440,6 +1975,7 @@ function CaseDetailView({
   initialTab = 0,
   autoOpenAddDefModal = false,
   selectedCaseId,
+  currentUser,
   onConsumedAutoOpenAddDefModal,
 }: {
   setView: (v: View) => void;
@@ -1447,21 +1983,20 @@ function CaseDetailView({
   initialTab?: number;
   autoOpenAddDefModal?: boolean;
   selectedCaseId?: string;
+  currentUser: SessionUser;
   onConsumedAutoOpenAddDefModal?: () => void;
 }) {
   const isEdit = mode === "form";
   const [tab, setTab] = useState(initialTab);
-  const activeCaseId = selectedCaseId?.trim() || "EXP-2024-1847";
+  const activeCaseId = selectedCaseId?.trim() || "";
+  const [caseRecord, setCaseRecord] = useState<DbRow | null>(null);
+  const [caseDocs, setCaseDocs] = useState<Array<typeof docsData[0] & { ruta?: string }>>([]);
+  const [caseUploadFile, setCaseUploadFile] = useState<File | null>(null);
+  const [caseUploadDescription, setCaseUploadDescription] = useState("");
+  const [analystOptions, setAnalystOptions] = useState<string[]>([]);
 
   // ── Defendants state ──
-  const [defs, setDefs] = useState<DefEntry[]>([{
-    id: 1, tipo: "Persona Física", nombre: "Carlos Armando Méndez Ríos",
-    doc: "001-1182044-3", edad: "47", sexo: "Hombre", nac: "Dominicano/a",
-    estadoImp: "Prófugo", estadoJud: "Condenado", centro: "N/A",
-    penaImp: "15", penaPriv: "15", penaSusp: "0",
-    indemnizacion: "2,500,000", garantia: "0", multa: "500,000", decomiso: "2 vehículos, 1 embarcación",
-    subidoPN: true, arresto: true, alertaRoja: true, alertaMig: true,
-  }]);
+  const [defs, setDefs] = useState<DefEntry[]>([]);
   const [showDefModal, setShowDefModal] = useState(false);
   const [newDef, setNewDef] = useState<Omit<DefEntry, "id">>({ ...EMPTY_DEF });
   const [dialog, setDialog] = useState<null | {
@@ -1531,15 +2066,12 @@ function CaseDetailView({
         setDialog(null);
         setNewDef({ ...EMPTY_DEF });
         setShowDefModal(false);
-        if (selectedCaseId) {
-          setView("defendants");
-        }
       },
       onCancel: () => setDialog(null),
     });
   };
 
-  const addDef = () => {
+  const addDef = async () => {
     const allFieldsEmpty = !hasUnsavedDefData(newDef);
 
     if (allFieldsEmpty) {
@@ -1564,34 +2096,189 @@ function CaseDetailView({
       return;
     }
 
-    setDefs(prev => [...prev, { ...newDef, id: Date.now() }]);
+    if (activeCaseId) {
+      const { data, error } = await supabase.from("imputados").insert({
+        expediente_id: caseRecord?.id,
+        numero_expediente: activeCaseId,
+        tipo_persona: newDef.tipo,
+        nombre_completo: newDef.nombre,
+        documento: newDef.doc,
+        edad: newDef.edad ? Number(newDef.edad) : null,
+        sexo: newDef.sexo,
+        nacionalidad: newDef.nac,
+        estado_imputado: newDef.estadoImp,
+        estado_judicial: newDef.estadoJud,
+        centro_penitenciario: newDef.centro,
+        pena: newDef.penaImp ? `${newDef.penaImp} años` : "",
+        pena_impuesta: newDef.penaImp ? Number(newDef.penaImp) : null,
+        pena_privativa: newDef.penaPriv ? Number(newDef.penaPriv) : null,
+        pena_suspendida: newDef.penaSusp ? Number(newDef.penaSusp) : null,
+        indemnizacion: newDef.indemnizacion ? Number(String(newDef.indemnizacion).replace(/,/g, "")) : null,
+        garantia: newDef.garantia ? Number(String(newDef.garantia).replace(/,/g, "")) : null,
+        multa: newDef.multa ? Number(String(newDef.multa).replace(/,/g, "")) : null,
+        decomiso: newDef.decomiso,
+        alerta_roja: newDef.alertaRoja,
+        alerta_migratoria: newDef.alertaMig,
+        orden_arresto: newDef.arresto,
+        subido_a_pn: newDef.subidoPN,
+      }).select().single();
+
+      if (error) {
+        console.error("Error agregando imputado al expediente:", error);
+        return;
+      }
+
+      setDefs(prev => [...prev, { ...newDef, id: firstId(Date.now(), data?.id) }]);
+    } else {
+      setDefs(prev => [...prev, { ...newDef, id: Date.now() }]);
+    }
     setNewDef({ ...EMPTY_DEF });
     setShowDefModal(false);
-    if (selectedCaseId) {
-      setView("defendants");
-    }
   };
   const removeDef = (id: number) => setDefs(prev => prev.filter(d => d.id !== id));
 
   // ── Victims state ──
-  const [vics, setVics] = useState<VicEntry[]>([
-    { id: 1, tipo: "Persona Física", nombre: "Luis Alberto Fernández Méndez" },
-    { id: 2, tipo: "Persona Jurídica", nombre: "BANCORP S.A." },
-  ]);
+  const [vics, setVics] = useState<VicEntry[]>([]);
   const [showVicModal, setShowVicModal] = useState(false);
   const [newVic, setNewVic] = useState({ tipo: "Persona Física", nombre: "" });
 
-  const addVic = () => {
+  const addVic = async () => {
     if (!newVic.nombre.trim()) return;
-    setVics(prev => [...prev, { id: Date.now(), ...newVic }]);
+    if (activeCaseId) {
+      const { data, error } = await supabase.from("victimas").insert({
+        expediente_id: caseRecord?.id,
+        numero_expediente: activeCaseId,
+        tipo_persona: newVic.tipo,
+        nombre_completo: newVic.nombre,
+        imputado_relacionado: defs[0]?.nombre ?? "",
+        delito: firstText(caseRecord?.delito_principal),
+      }).select().single();
+
+      if (error) {
+        console.error("Error agregando víctima al expediente:", error);
+        return;
+      }
+
+      setVics(prev => [...prev, { id: firstId(Date.now(), data?.id), ...newVic }]);
+    } else {
+      setVics(prev => [...prev, { id: Date.now(), ...newVic }]);
+    }
     setNewVic({ tipo: "Persona Física", nombre: "" });
     setShowVicModal(false);
   };
   const removeVic = (id: number) => setVics(prev => prev.filter(v => v.id !== id));
 
   // ── Measures state ──
-  const [measures, setMeasures] = useState({ arresto: true, roja: true, migratoria: true, policia: true });
+  const [measures, setMeasures] = useState({ arresto: false, roja: false, migratoria: false, policia: false });
   const toggleMeasure = (k: keyof typeof measures) => setMeasures(m => ({ ...m, [k]: !m[k] }));
+
+  useEffect(() => {
+    if (!activeCaseId) return;
+    let active = true;
+
+    const loadCase = async () => {
+      const { data: expRow } = await supabase
+        .from("expedientes")
+        .select("*")
+        .eq("numero_expediente", activeCaseId)
+        .maybeSingle();
+      if (!active) return;
+      setCaseRecord(expRow ?? null);
+
+      const { data: imputadoRows } = await supabase
+        .from("imputados")
+        .select("*")
+        .eq("numero_expediente", activeCaseId);
+      if (active) {
+        const loadedDefs = (imputadoRows ?? []).map(mapImputadoRow).map(row => ({
+          id: row.id,
+          tipo: row.sexo === "Persona Jurídica" ? "Persona Jurídica" : "Persona Física",
+          nombre: row.nombre,
+          doc: row.doc,
+          edad: row.edad ? String(row.edad) : "",
+          sexo: row.sexo,
+          nac: "",
+          estadoImp: row.estatus,
+          estadoJud: row.estJud,
+          centro: "",
+          penaImp: row.pena,
+          penaPriv: "",
+          penaSusp: "",
+          indemnizacion: "",
+          garantia: "",
+          multa: "",
+          decomiso: "",
+          subidoPN: row.policia,
+          arresto: row.ordenArresto,
+          alertaRoja: row.alertaRoja,
+          alertaMig: row.alertaMig,
+        }));
+        setDefs(loadedDefs);
+        setMeasures({
+          arresto: loadedDefs.some(d => d.arresto),
+          roja: loadedDefs.some(d => d.alertaRoja),
+          migratoria: loadedDefs.some(d => d.alertaMig),
+          policia: loadedDefs.some(d => d.subidoPN),
+        });
+      }
+
+      const { data: victimRows } = await supabase
+        .from("victimas")
+        .select("*")
+        .eq("numero_expediente", activeCaseId);
+      if (active) {
+        setVics((victimRows ?? []).map((row, idx) => ({
+          id: firstId(idx + 1, row.id),
+          tipo: firstText(row.tipo_persona, "Persona Física"),
+          nombre: firstText(row.nombre_completo, row.nombre),
+        })));
+      }
+
+      const { data: docRows } = await supabase
+        .from("documentos")
+        .select("*")
+        .eq("numero_expediente", activeCaseId)
+        .order("fecha_subida", { ascending: false });
+      if (active) {
+        setCaseDocs((docRows ?? []).map((row, idx) => ({
+          id: firstId(idx + 1, row.id),
+          nombre: firstText(row.nombre_archivo, row.nombre),
+          tipo: firstText(row.tipo_archivo, row.tipo).toUpperCase(),
+          peso: firstText(row.peso),
+          exp: firstText(row.numero_expediente),
+          imputado: firstText(row.imputado),
+          descripcion: firstText(row.descripcion),
+          subidoPor: firstText(row.subido_por),
+          fecha: formatDateTime(row.fecha_subida, row.created_at),
+          version: firstId(1, row.version),
+          ruta: firstText(row.ruta_storage),
+        })));
+      }
+    };
+
+    loadCase();
+    return () => {
+      active = false;
+    };
+  }, [activeCaseId]);
+
+  useEffect(() => {
+    let active = true;
+    supabase
+      .from("usuarios")
+      .select("nombre_completo, usuario")
+      .eq("rol", "Analista")
+      .eq("estatus", "Activo")
+      .order("nombre_completo", { ascending: true })
+      .then(({ data }) => {
+        if (!active) return;
+        const names = (data ?? []).map(row => firstText(row.nombre_completo, row.usuario)).filter(Boolean);
+        setAnalystOptions(names.length > 0 ? names : ["Analista UCAPREC"]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const tabs = ["Datos Generales", "Imputados", "Víctimas", "Medidas / Alertas", "Localización", "Documentos", "Observaciones"];
   const inputCls = `w-full px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground placeholder:text-muted-foreground/50 ${!isEdit ? "opacity-75 cursor-default" : ""}`;
@@ -1601,15 +2288,15 @@ function CaseDetailView({
     <div>
       <label className={labelCls}>{label}{required && <span className="text-red-500 ml-0.5">*</span>}</label>
       {type === "textarea"
-        ? <textarea readOnly={!isEdit} defaultValue={value} rows={3} className={`${inputCls} resize-none`} />
-        : <input readOnly={!isEdit} type={type} defaultValue={value} className={inputCls} />
+        ? <textarea key={`${label}-${value}`} readOnly={!isEdit} defaultValue={value} rows={3} className={`${inputCls} resize-none`} />
+        : <input key={`${label}-${value}`} readOnly={!isEdit} type={type} defaultValue={value} className={inputCls} />
       }
     </div>
   );
   const Sel = ({ label, value, options, required = false }: { label: string; value?: string; options: string[]; required?: boolean }) => (
     <div>
       <label className={labelCls}>{label}{required && <span className="text-red-500 ml-0.5">*</span>}</label>
-      <select disabled={!isEdit} defaultValue={value} className={inputCls}>
+      <select key={`${label}-${value}`} disabled={!isEdit} defaultValue={value} className={inputCls}>
         {options.map(o => <option key={o} value={o}>{o}</option>)}
       </select>
     </div>
@@ -1619,13 +2306,180 @@ function CaseDetailView({
       {v ? <CheckSquare size={10} /> : <X size={10} />}{v ? "Sí" : "No"}
     </div>
   );
+  const activeCase = caseRecord ? mapExpedienteRow(caseRecord, 0) : null;
 
   // Export helpers for this case
   const exportCaseCSV = () => {
-    downloadCSV(
+    downloadExcel(
       ["Expediente", "Sentencia", "Imputado", "Documento", "Estado", "Pena", "Alerta Roja", "Alert. Migratoria", "Orden Arresto"],
-      defs.map(d => [activeCaseId, "SCJ-PEN-2024-0892", d.nombre, d.doc, d.estadoImp, d.penaImp + " años", d.alertaRoja ? "Sí" : "No", d.alertaMig ? "Sí" : "No", d.arresto ? "Sí" : "No"]),
-      `${activeCaseId}.csv`
+      defs.map(d => [activeCaseId, activeCase?.sentencia ?? "", d.nombre, d.doc, d.estadoImp, d.penaImp, d.alertaRoja ? "Sí" : "No", d.alertaMig ? "Sí" : "No", d.arresto ? "Sí" : "No"]),
+      `${activeCaseId}.xls`
+    );
+  };
+
+  const uploadCaseDocumentInputId = "ucaprec-case-document-upload";
+  const showCaseDocumentMessage = (title: string, message: string, variant: "info" | "danger" = "info") => {
+    setDialog({
+      title,
+      message,
+      variant,
+      confirmLabel: "Aceptar",
+      onConfirm: () => setDialog(null),
+    });
+  };
+
+  const getCaseDocumentUrl = async (doc: typeof caseDocs[number]) => {
+    if (!doc.ruta) {
+      showCaseDocumentMessage("Documento no disponible", "Este documento no tiene una ruta de archivo asociada en Storage.", "danger");
+      return "";
+    }
+
+    const { data, error } = await supabase.storage.from("documentos").createSignedUrl(doc.ruta, 60 * 5);
+    if (error || !data?.signedUrl) {
+      console.error("Error generando enlace del documento:", error);
+      showCaseDocumentMessage("No se pudo abrir el documento", "No fue posible generar el enlace privado del archivo. Verifique que exista en Storage.", "danger");
+      return "";
+    }
+
+    return data.signedUrl;
+  };
+
+  const previewCaseDocument = async (doc: typeof caseDocs[number]) => {
+    const url = await getCaseDocumentUrl(doc);
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const downloadCaseDocument = async (doc: typeof caseDocs[number]) => {
+    const url = await getCaseDocumentUrl(doc);
+    if (!url) return;
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = doc.nombre;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  const uploadCaseDocument = async () => {
+    if (!activeCaseId) return;
+    if (!caseUploadFile) {
+      showCaseDocumentMessage("Seleccione un archivo", "Debe seleccionar un archivo antes de subir el documento.", "danger");
+      return;
+    }
+
+    const normalizedName = caseUploadFile.name.trim().toLowerCase();
+    const duplicateInView = caseDocs.some(doc => doc.nombre.trim().toLowerCase() === normalizedName);
+    if (duplicateInView) {
+      showCaseDocumentMessage("Documento duplicado", "Ya existe un documento con esa misma nomenclatura en este expediente.", "danger");
+      return;
+    }
+
+    const { data: duplicateRows, error: duplicateError } = await supabase
+      .from("documentos")
+      .select("id")
+      .eq("numero_expediente", activeCaseId)
+      .eq("nombre_archivo", caseUploadFile.name)
+      .limit(1);
+
+    if (duplicateError) {
+      console.error("Error validando documento duplicado:", duplicateError);
+      showCaseDocumentMessage("No se pudo validar el documento", "Intente nuevamente antes de subir el archivo.", "danger");
+      return;
+    }
+
+    if ((duplicateRows ?? []).length > 0) {
+      showCaseDocumentMessage("Documento duplicado", "Ya existe un documento con esa misma nomenclatura en este expediente.", "danger");
+      return;
+    }
+
+    const ext = caseUploadFile.name.split(".").pop()?.toUpperCase() || "FILE";
+    const storagePath = `${activeCaseId}/${Date.now()}-${caseUploadFile.name}`;
+    const { error: storageError } = await supabase.storage.from("documentos").upload(storagePath, caseUploadFile, { upsert: false });
+    if (storageError) {
+      console.error("Error subiendo documento del expediente:", storageError);
+      showCaseDocumentMessage("No se pudo subir el archivo", storageError.message, "danger");
+      return;
+    }
+    const { error } = await supabase.from("documentos").insert({
+      numero_expediente: activeCaseId,
+      nombre_archivo: caseUploadFile.name,
+      tipo_archivo: ext,
+      peso: `${(caseUploadFile.size / 1024 / 1024).toFixed(2)} MB`,
+      imputado: defs[0]?.nombre ?? "",
+      descripcion: caseUploadDescription,
+      subido_por: currentUser.username,
+      version: 1,
+      ruta_storage: storagePath,
+    });
+    if (error) {
+      console.error("Error registrando documento del expediente:", error);
+      await supabase.storage.from("documentos").remove([storagePath]);
+      showCaseDocumentMessage("No se pudo registrar el documento", error.message, "danger");
+      return;
+    }
+    setCaseDocs(prev => [{
+      id: Date.now(),
+      nombre: caseUploadFile.name,
+      tipo: ext,
+      peso: `${(caseUploadFile.size / 1024 / 1024).toFixed(2)} MB`,
+      exp: activeCaseId,
+      imputado: defs[0]?.nombre ?? "",
+      descripcion: caseUploadDescription,
+      subidoPor: currentUser.username,
+      fecha: new Date().toLocaleString("es-DO"),
+      version: 1,
+      ruta: storagePath,
+    }, ...prev]);
+    setCaseUploadFile(null);
+    setCaseUploadDescription("");
+  };
+
+  const confirmDeleteCaseDocument = (doc: typeof caseDocs[number]) => {
+    setDialog({
+      title: "Eliminar documento",
+      message: `¿Está seguro que desea eliminar "${doc.nombre}"? Esta acción no se puede deshacer.`,
+      variant: "danger",
+      confirmLabel: "Sí, eliminar",
+      cancelLabel: "Cancelar",
+      onCancel: () => setDialog(null),
+      onConfirm: async () => {
+        const { error } = await supabase
+          .from("documentos")
+          .delete()
+          .eq("numero_expediente", activeCaseId)
+          .eq("nombre_archivo", doc.nombre);
+
+        if (error) {
+          console.error("Error eliminando documento del expediente:", error);
+          showCaseDocumentMessage("No se pudo eliminar", error.message, "danger");
+          return;
+        }
+
+        if (doc.ruta) {
+          const { error: storageError } = await supabase.storage.from("documentos").remove([doc.ruta]);
+          if (storageError) console.error("Error eliminando archivo de Storage:", storageError);
+        }
+
+        setCaseDocs(prev => prev.filter(item => item.id !== doc.id));
+        setDialog(null);
+      },
+    });
+  };
+
+  if (!activeCaseId) {
+    return (
+      <div className="p-6">
+        <div className="bg-card border border-border rounded-lg p-10 flex flex-col items-center gap-4 text-center">
+          <FileSearch size={36} className="text-muted-foreground opacity-40" />
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Seleccione un expediente</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              Esta vista se completará cuando se abra un expediente real desde el listado.
+            </p>
+          </div>
+          <Btn variant="secondary" icon={ArrowLeft} onClick={() => setView("cases")}>Volver a Expedientes</Btn>
+        </div>
+      </div>
     );
   };
 
@@ -1644,7 +2498,9 @@ function CaseDetailView({
           <h1 className="text-xl font-semibold text-foreground" style={{ fontFamily: "'Crimson Pro', serif" }}>
             {isEdit ? "Editar Expediente" : "Detalle del Expediente"}
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{selectedCaseId ? `Expediente seleccionado: ${activeCaseId}` : "No. Sentencia SCJ-PEN-2024-0892 — Lavado de Activos"}</p>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {activeCase ? `No. Sentencia ${activeCase.sentencia || "Sin sentencia"} — ${activeCase.delito || "Sin delito"}` : `Expediente seleccionado: ${activeCaseId}`}
+          </p>
         </div>
         <div className="flex gap-2 flex-wrap justify-end">
           {!isEdit && (
@@ -1666,11 +2522,11 @@ function CaseDetailView({
       {/* Status strip */}
       {!isEdit && (
         <div className="flex flex-wrap gap-3 mb-6 px-4 py-3 bg-card border border-border rounded-lg text-xs">
-          {([["Estado Registro", <Badge label="Verificado" />], ["Imputado Principal", <Badge label="Prófugo" />],
+          {([["Estado Registro", <Badge label={activeCase?.estReg || "En Revisión"} />], ["Imputado Principal", <Badge label={activeCase?.estatus || "Sin estatus"} />],
             ["Alerta Roja", <BoolBadge v={measures.roja} />], ["Alert. Migratoria", <BoolBadge v={measures.migratoria} />],
             ["Orden Arresto", <BoolBadge v={measures.arresto} />], ["Subido a PN", <BoolBadge v={measures.policia} />],
-            ["Asignado a", <span className="font-mono">A. Rodríguez</span>], ["Última mod.", <span className="font-mono">28/11/2024 09:42</span>]
-          ] as [string, React.ReactNode][]).map(([l, v], i) => (
+            ["Asignado a", <span className="font-mono">{activeCase?.asignado || "Sin asignar"}</span>], ["Última mod.", <span className="font-mono">{formatDateTime(caseRecord?.updated_at, caseRecord?.created_at)}</span>]
+          ] as [string, ReactNode][]).map(([l, v], i) => (
             <div key={i} className="flex items-center gap-2">
               <span className="text-muted-foreground">{l}:</span>{v}
               {i < 7 && <span className="text-border ml-1">|</span>}
@@ -1696,18 +2552,18 @@ function CaseDetailView({
           {/* Tab 0: General Data */}
           {tab === 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              <Field label="Fecha de recepción" value="2024-11-28" type="date" required />
-              <Field label="No. Sentencia / Resolución" value="SCJ-PEN-2024-0892" required />
-              <Sel label="Tipo de Expediente" value="Sentencia" options={TIPOS_EXPEDIENTE} required />
-              <Field label="Jurisdicción" value="Primera Instancia Penal — Distrito Nacional" required />
-              <Sel label="Localidad de Jurisdicción" value="Distrito Nacional" options={JURISDICCIONES} />
-              <Field label="Fecha de la Decisión" value="2024-11-15" type="date" required />
-              <Sel label="Decisión" value="Acoge Recurso de Casación" options={DECISIONES} />
-              <Sel label="Quién Interpone el Recurso" value="Imputado" options={QUIEN_INTERPONE} />
-              <Sel label="Estado del Registro" value="Verificado" options={ESTADOS_REGISTRO} />
-              <Sel label="Asignado a" value="Ana Rodríguez" options={["Ana Rodríguez", "Luis Peña", "María Santos", "Pedro Álvarez"]} />
-              <Field label="Creado por" value="arodriguez" />
-              <Field label="Fecha de Creación" value="28/11/2024 09:42:11" />
+              <Field label="Fecha de recepción" value={firstText(caseRecord?.fecha_recepcion)} type="date" required />
+              <Field label="No. Sentencia / Resolución" value={activeCase?.sentencia} required />
+              <Sel label="Tipo de Expediente" value={activeCase?.tipo} options={TIPOS_EXPEDIENTE} required />
+              <Field label="Jurisdicción" value={firstText(caseRecord?.jurisdiccion)} required />
+              <Sel label="Localidad de Jurisdicción" value={firstText(caseRecord?.localidad_jurisdiccion)} options={JURISDICCIONES} />
+              <Field label="Fecha de la Decisión" value={firstText(caseRecord?.fecha_decision)} type="date" required />
+              <Sel label="Decisión" value={firstText(caseRecord?.decision)} options={DECISIONES} />
+              <Sel label="Quién Interpone el Recurso" value={firstText(caseRecord?.quien_interpone)} options={QUIEN_INTERPONE} />
+              <Sel label="Estado del Registro" value={activeCase?.estReg} options={ESTADOS_REGISTRO} />
+              <Sel label="Asignado a" value={activeCase?.asignado} options={analystOptions} />
+              <Field label="Creado por" value={firstText(caseRecord?.creado_por)} />
+              <Field label="Fecha de Creación" value={formatDateTime(caseRecord?.created_at)} />
             </div>
           )}
 
@@ -1843,45 +2699,75 @@ function CaseDetailView({
                 })}
               </div>
               <div className="border border-border rounded-lg p-4">
-                <Field label="Observaciones de medidas" type="textarea" value="28/11/2024 — Alerta Roja activada por coordinación con Interpol (arodriguez). Orden de arresto emitida por el Juzgado 3ro de Instrucción del Distrito Nacional." />
+                <Field label="Observaciones de medidas" type="textarea" value={firstText(caseRecord?.observacion)} />
               </div>
             </div>
           )}
 
           {/* Tab 4: Location */}
-          {tab === 4 && <LocationTab isEdit={isEdit} />}
+          {tab === 4 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <Field label="Provincia" value={firstText(caseRecord?.provincia)} />
+              <Field label="Municipio" value={firstText(caseRecord?.municipio)} />
+              <Field label="Sector" value={firstText(caseRecord?.sector)} />
+              <div className="sm:col-span-2 lg:col-span-3">
+                <Field label="Dirección Detallada" value={firstText(caseRecord?.direccion)} type="textarea" />
+              </div>
+              <Field label="Delito Principal" value={activeCase?.delito} />
+              <div className="sm:col-span-2">
+                <Field label="Tipos Penales" value={firstText(caseRecord?.tipos_penales)} />
+              </div>
+            </div>
+          )}
 
           {/* Tab 5: Documents */}
           {tab === 5 && (
             <div className="space-y-4">
               {isEdit && (
                 <div className="border-2 border-dashed border-border rounded-lg p-8 flex flex-col items-center gap-3 hover:border-primary/40 transition-colors">
+                  <input
+                    id={uploadCaseDocumentInputId}
+                    type="file"
+                    className="hidden"
+                    onChange={event => setCaseUploadFile(event.target.files?.[0] ?? null)}
+                  />
                   <Upload size={24} className="text-muted-foreground" />
                   <div className="text-center">
                     <p className="text-sm font-medium text-foreground">Arrastre documentos aquí o haga clic para seleccionar</p>
                     <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, XLSX, JPG, PNG — Máx. 20MB por archivo</p>
                   </div>
-                  <Btn variant="secondary" size="sm">Seleccionar archivos</Btn>
+                  {caseUploadFile && <p className="text-xs text-primary font-mono">{caseUploadFile.name}</p>}
+                  <input
+                    value={caseUploadDescription}
+                    onChange={event => setCaseUploadDescription(event.target.value)}
+                    className="w-full max-w-md px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground"
+                    placeholder="Descripción del documento"
+                  />
+                  <div className="flex gap-2">
+                    <Btn variant="secondary" size="sm" onClick={() => document.getElementById(uploadCaseDocumentInputId)?.click()}>Seleccionar archivo</Btn>
+                    <Btn icon={Upload} size="sm" onClick={uploadCaseDocument}>Subir documento</Btn>
+                  </div>
                 </div>
               )}
               <div className="space-y-2">
-                {[
-                  { nombre: "Sentencia_SCJ_0892_2024.pdf", tipo: "PDF", peso: "2.4 MB", subido: "28/11/2024 09:44", subidoPor: "arodriguez", desc: "Sentencia condenatoria SCJ" },
-                  { nombre: "Orden_Arresto_JDO3_2024.pdf", tipo: "PDF", peso: "0.8 MB", subido: "28/11/2024 10:12", subidoPor: "msantos", desc: "Orden de arresto emitida" },
-                  { nombre: "Informe_UIFE_Activos.docx", tipo: "DOCX", peso: "1.2 MB", subido: "29/11/2024 08:30", subidoPor: "arodriguez", desc: "Informe pericial económico" },
-                ].map((doc, i) => (
+                {caseDocs.length === 0 ? (
+                  <div className="flex flex-col items-center gap-3 py-10 text-muted-foreground border border-border rounded-lg">
+                    <FileText size={28} className="opacity-30" />
+                    <p className="text-sm">Todavía no hay documentos asociados a este expediente.</p>
+                  </div>
+                ) : caseDocs.map((doc, i) => (
                   <div key={i} className="flex items-center gap-4 p-3 border border-border rounded-lg hover:bg-muted/20 transition-colors">
                     <div className="w-9 h-9 rounded-md bg-red-50 dark:bg-red-900/20 flex items-center justify-center flex-shrink-0">
                       <FileText size={16} className="text-red-600" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-foreground truncate">{doc.nombre}</p>
-                      <p className="text-xs text-muted-foreground">{doc.desc} · {doc.peso} · Subido por {doc.subidoPor} el {doc.subido}</p>
+                      <p className="text-xs text-muted-foreground">{doc.descripcion || "Sin descripción"} · {doc.peso} · Subido por {doc.subidoPor || "N/D"} el {doc.fecha}</p>
                     </div>
                     <div className="flex gap-1 flex-shrink-0">
-                      <button className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"><Eye size={14} /></button>
-                      <button className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"><Download size={14} /></button>
-                      {isEdit && <button className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-600 transition-colors"><Trash2 size={14} /></button>}
+                      <button onClick={() => previewCaseDocument(doc)} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Vista previa"><Eye size={14} /></button>
+                      <button onClick={() => downloadCaseDocument(doc)} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Descargar"><Download size={14} /></button>
+                      {isEdit && <button onClick={() => confirmDeleteCaseDocument(doc)} className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-600 transition-colors" title="Eliminar"><Trash2 size={14} /></button>}
                     </div>
                   </div>
                 ))}
@@ -1895,16 +2781,14 @@ function CaseDetailView({
               <Field
                 label="Observación general del caso"
                 type="textarea"
-                value="El imputado Carlos Méndez Ríos fugó del país previo a la lectura de sentencia. Se coordinó con Interpol para emisión de alerta roja el 15/11/2024. Se notificó a la Dirección General de Migración para alerta migratoria. El caso se encuentra en seguimiento activo por la UCAPREC. Patrimonio investigado estimado en RD$42 millones vinculados a actividades de lavado."
+                value={firstText(caseRecord?.observacion)}
               />
               <div className="border border-border rounded-lg overflow-hidden">
                 <div className="bg-muted/30 px-4 py-2.5 border-b border-border">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Historial de Cambios</p>
                 </div>
                 {[
-                  { u: "msantos", a: "Verificó el expediente", t: "28/11/2024 10:05" },
-                  { u: "arodriguez", a: `Subió documento Sentencia_SCJ_0892_2024.pdf`, t: "28/11/2024 09:44" },
-                  { u: "arodriguez", a: `Creó el expediente con ${defs.length} imputado(s) y ${vics.length} víctima(s)`, t: "28/11/2024 09:42" },
+                  { u: firstText(caseRecord?.creado_por, activeCase?.asignado, "sistema"), a: `Creó o actualizó el expediente con ${defs.length} imputado(s), ${vics.length} víctima(s) y ${caseDocs.length} documento(s)`, t: formatDateTime(caseRecord?.updated_at, caseRecord?.created_at) },
                 ].map((h, i) => (
                   <div key={i} className="flex gap-3 px-4 py-3 border-b border-border/50 last:border-0">
                     <div className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px] font-bold text-blue-700 dark:text-blue-400 flex-shrink-0 mt-0.5">{h.u[0].toUpperCase()}</div>
@@ -2033,8 +2917,9 @@ function CaseDetailView({
 }
 
 // ─── New Case View ───────────────────────────────────────────────────────────
-function NewCaseView({ setView }: { setView: (v: View) => void }) {
+function NewCaseView({ setView, currentUser }: { setView: (v: View) => void; currentUser: SessionUser }) {
   const [tab, setTab] = useState(0);
+  const [saving, setSaving] = useState(false);
   const [showDefModal, setShowDefModal] = useState(false);
   const [showVicModal, setShowVicModal] = useState(false);
   const [dialog, setDialog] = useState<null | {
@@ -2047,6 +2932,7 @@ function NewCaseView({ setView }: { setView: (v: View) => void }) {
     onCancel?: () => void;
   }>(null);
   const [general, setGeneral] = useState({
+    numeroExpediente: "",
     fechaRecepcion: "",
     sentencia: "",
     tipoExpediente: "",
@@ -2067,6 +2953,7 @@ function NewCaseView({ setView }: { setView: (v: View) => void }) {
   const [measures, setMeasures] = useState({ arresto: false, roja: false, migratoria: false, policia: false });
   const [location, setLocation] = useState({ provincia: "", municipio: "", sector: "", direccion: "", delito: "", tiposPenales: "" });
   const [observation, setObservation] = useState("");
+  const [analystOptions, setAnalystOptions] = useState<string[]>([]);
 
   const municipios = useMemo(() => location.provincia ? getMunicipios(location.provincia) : [], [location.provincia]);
   const sectores = useMemo(() => (location.provincia && location.municipio) ? getSectores(location.provincia, location.municipio) : [], [location.provincia, location.municipio]);
@@ -2077,6 +2964,32 @@ function NewCaseView({ setView }: { setView: (v: View) => void }) {
   const updateGeneral = (key: keyof typeof general, value: string) => setGeneral(prev => ({ ...prev, [key]: value }));
   const updateLocation = (key: keyof typeof location, value: string) => setLocation(prev => ({ ...prev, [key]: value }));
   const toggleMeasure = (k: keyof typeof measures) => setMeasures(prev => ({ ...prev, [k]: !prev[k] }));
+
+  useEffect(() => {
+    setGeneral(prev => ({
+      ...prev,
+      creadoPor: currentUser.username,
+      fechaCreacion: new Date().toLocaleString("es-DO"),
+    }));
+  }, [currentUser.username]);
+
+  useEffect(() => {
+    let active = true;
+    supabase
+      .from("usuarios")
+      .select("nombre_completo, usuario")
+      .eq("rol", "Analista")
+      .eq("estatus", "Activo")
+      .order("nombre_completo", { ascending: true })
+      .then(({ data }) => {
+        if (!active) return;
+        const names = (data ?? []).map(row => firstText(row.nombre_completo, row.usuario)).filter(Boolean);
+        setAnalystOptions(names.length > 0 ? names : ["Analista UCAPREC"]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const hasUnsavedNewCaseData = () => {
     const generalHasData = Object.values(general).some(v => String(v ?? "").trim() !== "");
@@ -2105,6 +3018,136 @@ function NewCaseView({ setView }: { setView: (v: View) => void }) {
         setView("cases");
       },
       onCancel: () => setDialog(null),
+    });
+  };
+
+  const handleSaveNewCase = async () => {
+    if (!general.numeroExpediente.trim() || !general.sentencia.trim() || !general.tipoExpediente.trim()) {
+      setDialog({
+        title: "Datos requeridos",
+        message: "Debe completar el número de expediente, el número de sentencia/resolución y el tipo de expediente.",
+        variant: "info",
+        confirmLabel: "Entendido",
+        onConfirm: () => setDialog(null),
+      });
+      return;
+    }
+
+    setSaving(true);
+    const caseNumber = general.numeroExpediente.trim();
+    const payload = {
+      numero_expediente: caseNumber,
+      numero_sentencia: general.sentencia,
+      tipo_expediente: general.tipoExpediente,
+      jurisdiccion: general.jurisdiccion,
+      localidad_jurisdiccion: general.localidad,
+      fecha_recepcion: general.fechaRecepcion || null,
+      fecha_decision: general.fechaDecision || null,
+      decision: general.decision,
+      quien_interpone: general.interpone,
+      estado_registro: general.estadoRegistro || "En Revisión",
+      asignado_a: general.asignado,
+      creado_por: currentUser.username,
+      provincia: location.provincia,
+      municipio: location.municipio,
+      sector: location.sector,
+      direccion: location.direccion,
+      delito_principal: location.delito,
+      tipos_penales: location.tiposPenales,
+      observacion: observation,
+    };
+
+    const { data: savedCase, error } = await supabase.from("expedientes").insert(payload).select().single();
+
+    if (error) {
+      setSaving(false);
+      const unauthorized = error.message?.toLowerCase().includes("unauthorized") || error.message?.includes("401");
+      setDialog({
+        title: unauthorized ? "Supabase bloqueó el registro" : "No se pudo guardar el expediente",
+        message: unauthorized
+          ? "La tabla expedientes está rechazando la solicitud. Revise la llave pública y las políticas RLS para permitir insert/select desde el rol anon o autenticado."
+          : error.message,
+        variant: "danger",
+        confirmLabel: "Entendido",
+        onConfirm: () => setDialog(null),
+      });
+      return;
+    }
+
+    const savedCaseId = savedCase?.id;
+
+    if (defs.length > 0) {
+      await supabase.from("imputados").insert(defs.map(def => ({
+        expediente_id: savedCaseId,
+        numero_expediente: caseNumber,
+        tipo_persona: def.tipo,
+        nombre_completo: def.nombre,
+        documento: def.doc,
+        edad: def.edad ? Number(def.edad) : null,
+        sexo: def.sexo,
+        nacionalidad: def.nac,
+        estado_imputado: def.estadoImp,
+        estado_judicial: def.estadoJud,
+        centro_penitenciario: def.centro,
+        pena: def.penaImp ? `${def.penaImp} años` : "",
+        pena_impuesta: def.penaImp ? Number(def.penaImp) : null,
+        pena_privativa: def.penaPriv ? Number(def.penaPriv) : null,
+        pena_suspendida: def.penaSusp ? Number(def.penaSusp) : null,
+        indemnizacion: def.indemnizacion ? Number(String(def.indemnizacion).replace(/,/g, "")) : null,
+        garantia: def.garantia ? Number(String(def.garantia).replace(/,/g, "")) : null,
+        multa: def.multa ? Number(String(def.multa).replace(/,/g, "")) : null,
+        decomiso: def.decomiso,
+        alerta_roja: def.alertaRoja || measures.roja,
+        alerta_migratoria: def.alertaMig || measures.migratoria,
+        orden_arresto: def.arresto || measures.arresto,
+        subido_a_pn: def.subidoPN || measures.policia,
+      })));
+    }
+
+    if (vics.length > 0) {
+      await supabase.from("victimas").insert(vics.map(vic => ({
+        expediente_id: savedCaseId,
+        numero_expediente: caseNumber,
+        tipo_persona: vic.tipo,
+        nombre_completo: vic.nombre,
+        imputado_relacionado: defs[0]?.nombre ?? "",
+        delito: location.delito,
+      })));
+    }
+
+    const activeMeasures = [
+      measures.roja ? "Alerta Roja" : "",
+      measures.migratoria ? "Alerta Migratoria" : "",
+      measures.arresto ? "Orden de Arresto" : "",
+      measures.policia ? "Subido a PN" : "",
+    ].filter(Boolean);
+    const measureTargets = defs.length > 0 ? defs : [{ ...EMPTY_DEF, nombre: "" }];
+    if (activeMeasures.length > 0) {
+      await supabase.from("medidas_alertas_expediente").insert(activeMeasures.flatMap(tipo =>
+        measureTargets.map(def => ({
+          expediente_id: savedCaseId,
+          numero_expediente: caseNumber,
+          tipo_medida: tipo,
+          imputado: def.nombre,
+          delito: location.delito,
+          activada_por: currentUser.username,
+          activa: true,
+          observacion: observation,
+        }))
+      ));
+    }
+
+    setSaving(false);
+
+    setDialog({
+      title: "Expediente registrado",
+      message: `El expediente ${caseNumber} fue guardado correctamente.`,
+      variant: "info",
+      confirmLabel: "Volver a Expedientes",
+      onConfirm: () => {
+        setDialog(null);
+        setView("cases");
+      },
     });
   };
 
@@ -2139,7 +3182,7 @@ function NewCaseView({ setView }: { setView: (v: View) => void }) {
         </div>
         <div className="flex gap-2 flex-wrap justify-end">
           <Btn variant="secondary" size="sm" onClick={handleCancelNewCase}>Cancelar</Btn>
-          <Btn size="sm" icon={CheckCircle} onClick={() => setView("cases")}>Guardar Cambios</Btn>
+          <Btn size="sm" icon={CheckCircle} onClick={handleSaveNewCase}>{saving ? "Guardando..." : "Guardar Cambios"}</Btn>
         </div>
       </div>
 
@@ -2156,6 +3199,7 @@ function NewCaseView({ setView }: { setView: (v: View) => void }) {
         <div className="p-6">
           <div className={tab === 0 ? "" : "hidden"}>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              <div><label className={labelCls}>No. Expediente<span className="text-red-500 ml-0.5">*</span></label><input value={general.numeroExpediente} onChange={e => updateGeneral("numeroExpediente", e.target.value)} className={inputCls} placeholder="Digite el número recibido" /></div>
               <div><label className={labelCls}>Fecha de recepción<span className="text-red-500 ml-0.5">*</span></label><input type="date" value={general.fechaRecepcion} onChange={e => updateGeneral("fechaRecepcion", e.target.value)} className={inputCls} /></div>
               <div><label className={labelCls}>No. Sentencia / Resolución<span className="text-red-500 ml-0.5">*</span></label><input value={general.sentencia} onChange={e => updateGeneral("sentencia", e.target.value)} className={inputCls} /></div>
               <div><label className={labelCls}>Tipo de Expediente<span className="text-red-500 ml-0.5">*</span></label><select value={general.tipoExpediente} onChange={e => updateGeneral("tipoExpediente", e.target.value)} className={inputCls}><option value="">Seleccione una opción</option>{TIPOS_EXPEDIENTE.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
@@ -2165,9 +3209,9 @@ function NewCaseView({ setView }: { setView: (v: View) => void }) {
               <div><label className={labelCls}>Decisión</label><select value={general.decision} onChange={e => updateGeneral("decision", e.target.value)} className={inputCls}><option value="">Seleccione una opción</option>{DECISIONES.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
               <div><label className={labelCls}>Quién Interpone el Recurso</label><select value={general.interpone} onChange={e => updateGeneral("interpone", e.target.value)} className={inputCls}><option value="">Seleccione una opción</option>{QUIEN_INTERPONE.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
               <div><label className={labelCls}>Estado del Registro</label><select value={general.estadoRegistro} onChange={e => updateGeneral("estadoRegistro", e.target.value)} className={inputCls}><option value="">Seleccione una opción</option>{ESTADOS_REGISTRO.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-              <div><label className={labelCls}>Asignado a</label><select value={general.asignado} onChange={e => updateGeneral("asignado", e.target.value)} className={inputCls}><option value="">Seleccione una opción</option>{["Ana Rodríguez", "Luis Peña", "María Santos", "Pedro Álvarez"].map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-              <div><label className={labelCls}>Creado por</label><input value={general.creadoPor} onChange={e => updateGeneral("creadoPor", e.target.value)} className={inputCls} /></div>
-              <div><label className={labelCls}>Fecha de Creación</label><input value={general.fechaCreacion} onChange={e => updateGeneral("fechaCreacion", e.target.value)} className={inputCls} /></div>
+              <div><label className={labelCls}>Asignado a</label><select value={general.asignado} onChange={e => updateGeneral("asignado", e.target.value)} className={inputCls}><option value="">Seleccione una opción</option>{analystOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+              <div><label className={labelCls}>Creado por</label><input value={general.creadoPor} readOnly className={`${inputCls} opacity-75 cursor-default`} /></div>
+              <div><label className={labelCls}>Fecha de Creación</label><input value={general.fechaCreacion} readOnly className={`${inputCls} opacity-75 cursor-default`} /></div>
             </div>
           </div>
           <div className={tab === 1 ? "" : "hidden"}>
@@ -2239,8 +3283,8 @@ function AnalyticsView() {
         action={
           <div className="flex gap-2">
             <Btn variant="secondary" icon={Printer} size="sm" onClick={triggerPrint}>Imprimir</Btn>
-            <Btn variant="secondary" icon={FileSpreadsheet} size="sm" onClick={() => downloadCSV(
-              ["Mes", "Casos"], evolutionData.map(d => [d.mes, d.casos]), "evolucion-casos.csv"
+            <Btn variant="secondary" icon={FileSpreadsheet} size="sm" onClick={() => downloadExcel(
+              ["Mes", "Casos"], evolutionData.map(d => [d.mes, d.casos]), "evolucion-casos.xls"
             )}>Exportar Excel</Btn>
           </div>
         }
@@ -2343,7 +3387,7 @@ function AnalyticsView() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="font-mono font-medium text-foreground">{item.value.toLocaleString()}</span>
-                    <span className="text-muted-foreground/60 font-mono">({Math.round(item.value / total * 100)}%)</span>
+                    <span className="text-muted-foreground/60 font-mono">({total > 0 ? Math.round(item.value / total * 100) : 0}%)</span>
                   </div>
                 </div>
               );
@@ -2397,7 +3441,17 @@ function UsersView() {
   };
 
   type UserEntry = typeof usersData[0];
-  const [users, setUsers] = useState<UserEntry[]>(usersData);
+  const adminUserEntry: UserEntry = {
+    id: 1,
+    nombre: ADMIN_USER.name,
+    usuario: ADMIN_USER.username,
+    rol: ADMIN_USER.role,
+    estatus: "Activo",
+    acceso: "Sesión actual",
+    casos: 0,
+    email: ADMIN_USER.email,
+  };
+  const [users, setUsers] = useState<UserEntry[]>([adminUserEntry]);
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState<null | "new" | "view" | "edit" | "reset" | "delete">(null);
   const [selected, setSelected] = useState<UserEntry | null>(null);
@@ -2412,6 +3466,29 @@ function UsersView() {
     onConfirm: () => void;
     onCancel?: () => void;
   }>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    supabase
+      .from("usuarios")
+      .select("*")
+      .limit(1000)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error("Error cargando usuarios:", error);
+          setUsers([adminUserEntry]);
+          return;
+        }
+        const mappedUsers = (data ?? []).map(mapUsuarioRow);
+        setUsers(mappedUsers.length > 0 ? mappedUsers : [adminUserEntry]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const filtered = users.filter(u => {
     if (!search) return true;
@@ -2509,10 +3586,10 @@ function UsersView() {
               placeholder="Buscar por nombre, usuario, email…"
             />
           </div>
-          <Btn variant="secondary" icon={Download} size="sm" onClick={() => downloadCSV(
+          <Btn variant="secondary" icon={Download} size="sm" onClick={() => downloadExcel(
             ["Usuario", "Nombre", "Email", "Rol", "Estado", "Último Acceso"],
             filtered.map(u => [u.usuario, u.nombre, u.email, u.rol, u.estatus, u.acceso]),
-            "usuarios.csv"
+            "usuarios.xls"
           )}>Exportar</Btn>
         </div>
         <Table
@@ -2767,19 +3844,43 @@ function AuditView() {
   const [filterTipo, setFilterTipo] = useState("Todas");
   const [filterDesde, setFilterDesde] = useState("");
   const [filterHasta, setFilterHasta] = useState("");
+  const [auditRows, setAuditRows] = useState<typeof auditData>([]);
 
   const tipoMap: Record<string, string> = {
     "Crear": "create", "Editar": "update", "Exportar": "export", "Seguridad": "security"
   };
 
-  const filtered = useMemo(() => auditData.filter(r => {
+  useEffect(() => {
+    let active = true;
+
+    supabase
+      .from("auditoria")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(1000)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error("Error cargando auditoría:", error);
+          setAuditRows([]);
+          return;
+        }
+        setAuditRows((data ?? []).map(mapAuditRow));
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const filtered = useMemo(() => auditRows.filter(r => {
     if (filterTipo !== "Todas" && r.tipo !== tipoMap[filterTipo]) return false;
     if (search) {
       const q = search.toLowerCase();
-      if (!r.usuario.includes(q) && !r.accion.toLowerCase().includes(q) && !r.entidad.toLowerCase().includes(q) && !r.detalle.toLowerCase().includes(q) && !r.modulo.toLowerCase().includes(q)) return false;
+      if (!r.usuario.toLowerCase().includes(q) && !r.accion.toLowerCase().includes(q) && !r.entidad.toLowerCase().includes(q) && !r.detalle.toLowerCase().includes(q) && !r.modulo.toLowerCase().includes(q)) return false;
     }
     return true;
-  }), [search, filterTipo]);
+  }), [auditRows, search, filterTipo]);
 
   return (
     <div className="p-6">
@@ -2787,10 +3888,10 @@ function AuditView() {
         title="Registro de Auditoría"
         sub="Trazabilidad completa de todas las acciones críticas del sistema"
         action={
-          <Btn variant="secondary" icon={Download} size="sm" onClick={() => downloadCSV(
+          <Btn variant="secondary" icon={Download} size="sm" onClick={() => downloadExcel(
             ["#", "Usuario", "Acción", "Módulo", "Entidad", "Detalle", "IP", "Fecha"],
             filtered.map(r => [r.id, r.usuario, r.accion, r.modulo, r.entidad, r.detalle, r.ip, r.fecha]),
-            "auditoria-log.csv"
+            "auditoria-log.xls"
           )}>Exportar Log</Btn>
         }
       />
@@ -2865,7 +3966,8 @@ function AuditView() {
 // ─── Defendants View ──────────────────────────────────────────────────────────
 
 function DefendantsView({ setView, openAddImputado }: { setView: (v: View) => void; openAddImputado: (caseId: string) => void }) {
-  const [defs, setDefs] = useState(defendants);
+  const [defs, setDefs] = useState<typeof defendants>([]);
+  const [caseOptions, setCaseOptions] = useState<typeof recentCases>([]);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("Todos");
   const [deleteId, setDeleteId] = useState<number | null>(null);
@@ -2882,6 +3984,43 @@ function DefendantsView({ setView, openAddImputado }: { setView: (v: View) => vo
     onCancel?: () => void;
   }>(null);
 
+  useEffect(() => {
+    let active = true;
+
+    supabase
+      .from("imputados")
+      .select("*")
+      .limit(1000)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error("Error cargando imputados:", error);
+          setDefs([]);
+          return;
+        }
+        setDefs((data ?? []).map(mapImputadoRow));
+      });
+
+    supabase
+      .from("expedientes")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(500)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error("Error cargando expedientes para imputados:", error);
+          setCaseOptions([]);
+          return;
+        }
+        setCaseOptions((data ?? []).map(mapExpedienteRow));
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const filtered = useMemo(() => defs.filter(d => {
     if (filterStatus !== "Todos" && d.estatus !== filterStatus) return false;
     const q = search.toLowerCase();
@@ -2891,13 +4030,13 @@ function DefendantsView({ setView, openAddImputado }: { setView: (v: View) => vo
 
   const selectableCases = useMemo(() => {
     const q = caseSearch.toLowerCase().trim();
-    if (!q) return recentCases;
-    return recentCases.filter(c =>
+    if (!q) return caseOptions;
+    return caseOptions.filter(c =>
       c.id.toLowerCase().includes(q) ||
       c.sentencia.toLowerCase().includes(q) ||
       c.imputado.toLowerCase().includes(q)
     );
-  }, [caseSearch]);
+  }, [caseOptions, caseSearch]);
 
   const handleOpenAddDefFlow = () => {
     setCaseSearch("");
@@ -2919,6 +4058,26 @@ function DefendantsView({ setView, openAddImputado }: { setView: (v: View) => vo
     }
     setShowSelectCaseForDef(false);
     openAddImputado(caseId);
+  };
+
+  const deleteDefendant = async () => {
+    if (deleteId === null) return;
+    const target = defs.find(d => d.id === deleteId);
+    if (!target) return;
+
+    const { error } = await supabase
+      .from("imputados")
+      .delete()
+      .eq("numero_expediente", target.exp)
+      .eq("nombre_completo", target.nombre);
+
+    if (error) {
+      console.error("Error eliminando imputado:", error);
+      return;
+    }
+
+    setDefs(prev => prev.filter(d => d.id !== deleteId));
+    setDeleteId(null);
   };
 
   return (
@@ -2945,10 +4104,10 @@ function DefendantsView({ setView, openAddImputado }: { setView: (v: View) => vo
             ))}
           </div>
           <div className="ml-auto flex gap-2">
-            <Btn variant="secondary" icon={Download} size="sm" onClick={() => downloadCSV(
+            <Btn variant="secondary" icon={Download} size="sm" onClick={() => downloadExcel(
               ["Nombre", "Documento", "Estatus", "Est. Judicial", "Expediente"],
               filtered.map(d => [d.nombre, d.doc, d.estatus, d.estJud, d.exp]),
-              "imputados.csv"
+              "imputados.xls"
             )}>Exportar</Btn>
           </div>
         </div>
@@ -2982,7 +4141,7 @@ function DefendantsView({ setView, openAddImputado }: { setView: (v: View) => vo
         />
         <div className="px-4 pb-4 border-t border-border pt-3 flex items-center justify-between">
           <span className="text-xs text-muted-foreground font-mono">{filtered.length} resultado(s)</span>
-          <Pagination />
+          <Pagination total={filtered.length} />
         </div>
       </div>
 
@@ -3098,11 +4257,22 @@ function DefendantsView({ setView, openAddImputado }: { setView: (v: View) => vo
             <p className="text-sm text-foreground mb-6">¿Está seguro que desea eliminar este imputado? Esta acción no se puede deshacer.</p>
             <div className="flex gap-2 justify-end">
               <Btn variant="secondary" onClick={() => setDeleteId(null)}>Cancelar</Btn>
-              <Btn variant="danger" icon={Trash2} onClick={() => { setDefs(prev => prev.filter(d => d.id !== deleteId)); setDeleteId(null); }}>Eliminar</Btn>
+              <Btn variant="danger" icon={Trash2} onClick={deleteDefendant}>Eliminar</Btn>
             </div>
           </div>
         </div>
       )}
+
+      <ActionDialog
+        open={dialog !== null}
+        title={dialog?.title ?? ""}
+        message={dialog?.message ?? ""}
+        variant={dialog?.variant ?? "info"}
+        confirmLabel={dialog?.confirmLabel ?? "Aceptar"}
+        cancelLabel={dialog?.cancelLabel}
+        onConfirm={dialog?.onConfirm ?? (() => setDialog(null))}
+        onCancel={dialog?.onCancel}
+      />
     </div>
   );
 }
@@ -3121,13 +4291,43 @@ const victimasData = [
 
 function VictimsView({ setView }: { setView: (v: View) => void }) {
   type VicRow = typeof victimasData[0];
-  const [vics, setVics] = useState<VicRow[]>(victimasData);
+  const [vics, setVics] = useState<VicRow[]>([]);
   const [search, setSearch] = useState("");
   const [filterTipo, setFilterTipo] = useState("Todos");
   const [modal, setModal] = useState<null | "new" | "edit" | "delete">(null);
   const [selected, setSelected] = useState<VicRow | null>(null);
   const [editForm, setEditForm] = useState<Partial<VicRow>>({});
   const [newVic, setNewVic] = useState({ exp: "", tipo: "Persona Física", nombre: "", imputado: "", delito: "" });
+
+  useEffect(() => {
+    let active = true;
+
+    supabase
+      .from("victimas")
+      .select("*")
+      .limit(1000)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error("Error cargando víctimas:", error);
+          setVics([]);
+          return;
+        }
+        setVics((data ?? []).map((row, idx) => ({
+          id: firstId(idx + 1, row.id, row.victima_id),
+          nombre: firstText(row.nombre_completo, row.nombre, row.razon_social),
+          tipo: firstText(row.tipo_persona, row.tipo, "Persona Física"),
+          exp: firstText(row.numero_expediente, row.expediente, row.expediente_id),
+          imputado: firstText(row.imputado, row.imputado_relacionado, row.nombre_imputado),
+          delito: firstText(row.delito, row.infraccion),
+          fecha: formatDate(row.fecha_registro, row.created_at, row.fecha),
+        })));
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const filtered = useMemo(() => vics.filter(v => {
     if (filterTipo !== "Todos" && v.tipo !== filterTipo) return false;
@@ -3141,14 +4341,60 @@ function VictimsView({ setView }: { setView: (v: View) => void }) {
   const inp = "w-full px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground";
   const lbl = "block text-xs font-medium text-muted-foreground mb-1 uppercase tracking-wider";
 
-  const addVic = () => {
+  const addVic = async () => {
     if (!newVic.nombre.trim() || !newVic.exp.trim()) return;
+    const { error } = await supabase.from("victimas").insert({
+      numero_expediente: newVic.exp,
+      tipo_persona: newVic.tipo,
+      nombre_completo: newVic.nombre,
+      imputado: newVic.imputado,
+      delito: newVic.delito,
+    });
+    if (error) {
+      console.error("Error registrando víctima:", error);
+      return;
+    }
     setVics(p => [...p, { id: Date.now(), ...newVic, fecha: new Date().toLocaleDateString("es-DO") }]);
     setNewVic({ exp: "", tipo: "Persona Física", nombre: "", imputado: "", delito: "" });
     setModal(null);
   };
-  const saveEdit = () => {
-    if (selected) setVics(p => p.map(v => v.id === selected.id ? { ...v, ...editForm } as VicRow : v));
+  const saveEdit = async () => {
+    if (!selected) return;
+    const { error } = await supabase
+      .from("victimas")
+      .update({
+        numero_expediente: editForm.exp,
+        tipo_persona: editForm.tipo,
+        nombre_completo: editForm.nombre,
+        imputado: editForm.imputado,
+        delito: editForm.delito,
+      })
+      .eq("numero_expediente", selected.exp)
+      .eq("nombre_completo", selected.nombre);
+
+    if (error) {
+      console.error("Error actualizando víctima:", error);
+      return;
+    }
+
+    setVics(p => p.map(v => v.id === selected.id ? { ...v, ...editForm } as VicRow : v));
+    setModal(null);
+  };
+
+  const deleteVictim = async () => {
+    if (!selected) return;
+    const { error } = await supabase
+      .from("victimas")
+      .delete()
+      .eq("numero_expediente", selected.exp)
+      .eq("nombre_completo", selected.nombre);
+
+    if (error) {
+      console.error("Error eliminando víctima:", error);
+      return;
+    }
+
+    setVics(p => p.filter(v => v.id !== selected.id));
     setModal(null);
   };
 
@@ -3178,10 +4424,10 @@ function VictimsView({ setView }: { setView: (v: View) => void }) {
             ))}
           </div>
           <div className="ml-auto flex gap-2">
-            <Btn variant="secondary" icon={Download} size="sm" onClick={() => downloadCSV(
+            <Btn variant="secondary" icon={Download} size="sm" onClick={() => downloadExcel(
               ["Nombre", "Tipo", "Expediente", "Imputado", "Delito", "Fecha"],
               filtered.map(v => [v.nombre, v.tipo, v.exp, v.imputado, v.delito, v.fecha]),
-              "victimas.csv"
+              "victimas.xls"
             )}>Exportar Excel</Btn>
             <Btn variant="secondary" icon={Printer} size="sm" onClick={triggerPrint}>Imprimir</Btn>
           </div>
@@ -3287,7 +4533,7 @@ function VictimsView({ setView }: { setView: (v: View) => void }) {
             <p className="text-sm text-foreground mb-6">¿Está seguro que desea eliminar este registro? Esta acción no se puede deshacer.</p>
             <div className="flex gap-2 justify-end">
               <Btn variant="secondary" onClick={() => setModal(null)}>Cancelar</Btn>
-              <Btn variant="danger" icon={Trash2} onClick={() => { setVics(p => p.filter(v => v.id !== selected.id)); setModal(null); }}>Eliminar</Btn>
+              <Btn variant="danger" icon={Trash2} onClick={deleteVictim}>Eliminar</Btn>
             </div>
           </div>
         </div>
@@ -3326,13 +4572,16 @@ function MeasuresView({ setView }: { setView: (v: View) => void }) {
     obs: "",
   };
 
-  const [measures, setMeasures] = useState<MeasureEntry[]>(measuresData);
+  const [measures, setMeasures] = useState<MeasureEntry[]>([]);
+  const [caseOptions, setCaseOptions] = useState<typeof recentCases>([]);
+  const [defendantOptions, setDefendantOptions] = useState<typeof defendants>([]);
   const [search, setSearch] = useState("");
   const [filterTipo, setFilterTipo] = useState("Todos");
   const [filterActiva, setFilterActiva] = useState("Activas");
   const [modalMode, setModalMode] = useState<null | "new" | "edit">(null);
   const [measureForm, setMeasureForm] = useState<Omit<MeasureEntry, "id">>({ ...EMPTY_MEASURE });
   const [initialMeasureForm, setInitialMeasureForm] = useState<Omit<MeasureEntry, "id">>({ ...EMPTY_MEASURE });
+  const [caseLookupSearch, setCaseLookupSearch] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [dialog, setDialog] = useState<null | {
     title: string;
@@ -3343,6 +4592,55 @@ function MeasuresView({ setView }: { setView: (v: View) => void }) {
     onConfirm: () => void;
     onCancel?: () => void;
   }>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    supabase
+      .from("medidas_alertas_expediente")
+      .select("*")
+      .limit(1000)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error("Error cargando medidas y alertas:", error);
+          setMeasures([]);
+          return;
+        }
+        setMeasures((data ?? []).map((row, idx) => ({
+          id: firstId(idx + 1, row.id, row.medida_id),
+          tipo: firstText(row.tipo_medida, row.tipo_alerta, row.tipo, "Alerta Roja"),
+          imputado: firstText(row.imputado, row.nombre_imputado),
+          exp: firstText(row.numero_expediente, row.expediente, row.expediente_id),
+          delito: firstText(row.delito, row.infraccion),
+          activadaPor: firstText(row.activada_por, row.usuario, row.created_by),
+          fecha: formatDate(row.fecha_activacion, row.fecha, row.created_at),
+          activa: row.activa === undefined && row.estado === undefined ? true : firstBool(row.activa, row.estado === "Activa", row.estado === "activo"),
+          obs: firstText(row.observacion, row.observaciones, row.descripcion),
+        })));
+      });
+
+    supabase
+      .from("expedientes")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(500)
+      .then(({ data }) => {
+        if (active) setCaseOptions((data ?? []).map(mapExpedienteRow));
+      });
+
+    supabase
+      .from("imputados")
+      .select("*")
+      .limit(1000)
+      .then(({ data }) => {
+        if (active) setDefendantOptions((data ?? []).map(mapImputadoRow));
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const tipoColors: Record<string, string> = {
     "Alerta Roja": "bg-red-100 text-red-800 dark:bg-red-900/25 dark:text-red-400",
@@ -3376,6 +4674,7 @@ function MeasuresView({ setView }: { setView: (v: View) => void }) {
       setMeasureForm(nextForm);
       setInitialMeasureForm(nextForm);
       setEditingId(measure.id);
+      setCaseLookupSearch(measure.exp);
       setModalMode("edit");
       return;
     }
@@ -3389,6 +4688,7 @@ function MeasuresView({ setView }: { setView: (v: View) => void }) {
     setMeasureForm(nextForm);
     setInitialMeasureForm(nextForm);
     setEditingId(null);
+    setCaseLookupSearch("");
     setModalMode("new");
   };
 
@@ -3418,7 +4718,20 @@ function MeasuresView({ setView }: { setView: (v: View) => void }) {
     });
   };
 
-  const saveMeasure = () => {
+  const selectedCasePreview = caseOptions.find(c => c.id === measureForm.exp);
+  const selectedCaseDefendants = defendantOptions.filter(d => d.exp === measureForm.exp);
+  const filteredMeasureCases = useMemo(() => {
+    const q = caseLookupSearch.trim().toLowerCase();
+    if (!q) return caseOptions;
+    return caseOptions.filter(c =>
+      c.id.toLowerCase().includes(q) ||
+      c.sentencia.toLowerCase().includes(q) ||
+      c.imputado.toLowerCase().includes(q) ||
+      c.delito.toLowerCase().includes(q)
+    );
+  }, [caseOptions, caseLookupSearch]);
+
+  const saveMeasure = async () => {
     if (!measureForm.exp.trim() || !measureForm.imputado.trim() || !measureForm.delito.trim() || !measureForm.activadaPor.trim()) {
       setDialog({
         title: "Datos requeridos",
@@ -3431,8 +4744,39 @@ function MeasuresView({ setView }: { setView: (v: View) => void }) {
     }
 
     if (modalMode === "edit" && editingId !== null) {
+      const target = measures.find(m => m.id === editingId);
+      if (target) {
+        const { error } = await supabase
+          .from("medidas_alertas_expediente")
+          .update({
+            numero_expediente: measureForm.exp,
+            tipo_medida: measureForm.tipo,
+            imputado: measureForm.imputado,
+            delito: measureForm.delito,
+            activada_por: measureForm.activadaPor,
+            activa: measureForm.activa,
+            observacion: measureForm.obs,
+          })
+          .eq("numero_expediente", target.exp)
+          .eq("tipo_medida", target.tipo)
+          .eq("imputado", target.imputado);
+
+        if (error) {
+          console.error("Error actualizando medida:", error);
+          return;
+        }
+      }
       setMeasures(prev => prev.map(m => m.id === editingId ? { ...m, ...measureForm } : m));
     } else {
+      await supabase.from("medidas_alertas_expediente").insert({
+        numero_expediente: measureForm.exp,
+        tipo_medida: measureForm.tipo,
+        imputado: measureForm.imputado,
+        delito: measureForm.delito,
+        activada_por: measureForm.activadaPor,
+        activa: measureForm.activa,
+        observacion: measureForm.obs,
+      });
       setMeasures(prev => [...prev, { id: Date.now(), ...measureForm }]);
     }
 
@@ -3447,7 +4791,19 @@ function MeasuresView({ setView }: { setView: (v: View) => void }) {
       variant: "danger",
       confirmLabel: "Eliminar",
       cancelLabel: "Volver",
-      onConfirm: () => {
+      onConfirm: async () => {
+        const { error } = await supabase
+          .from("medidas_alertas_expediente")
+          .delete()
+          .eq("numero_expediente", measure.exp)
+          .eq("tipo_medida", measure.tipo)
+          .eq("imputado", measure.imputado);
+
+        if (error) {
+          console.error("Error eliminando medida:", error);
+          return;
+        }
+
         setDialog(null);
         setMeasures(prev => prev.filter(m => m.id !== measure.id));
       },
@@ -3504,10 +4860,10 @@ function MeasuresView({ setView }: { setView: (v: View) => void }) {
             ))}
           </div>
           <div className="ml-auto flex gap-2">
-            <Btn variant="secondary" icon={Download} size="sm" onClick={() => downloadCSV(
+            <Btn variant="secondary" icon={Download} size="sm" onClick={() => downloadExcel(
               ["Tipo", "Imputado", "Expediente", "Delito", "Activada por", "Fecha", "Estado"],
               filtered.map(m => [m.tipo, m.imputado, m.exp, m.delito, m.activadaPor, m.fecha, m.activa ? "Activa" : "Inactiva"]),
-              "medidas.csv"
+              "medidas.xls"
             )}>Exportar</Btn>
           </div>
         </div>
@@ -3612,11 +4968,37 @@ function MeasuresView({ setView }: { setView: (v: View) => void }) {
             <div className="p-6 space-y-4">
               <div>
                 <label className={labelCls}>Expediente<span className="text-red-500">*</span></label>
-                <input value={measureForm.exp} onChange={e => setMeasureForm(p => ({ ...p, exp: e.target.value }))} className={inputCls} placeholder="Ej. EXP-2024-1847" />
+                <div className="relative mb-2">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    value={caseLookupSearch}
+                    onChange={e => setCaseLookupSearch(e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground"
+                    placeholder="Buscar por expediente, sentencia, imputado o delito"
+                  />
+                </div>
+                <select value={measureForm.exp} onChange={e => {
+                  const selected = caseOptions.find(c => c.id === e.target.value);
+                  setMeasureForm(p => ({ ...p, exp: e.target.value, delito: selected?.delito ?? p.delito, imputado: "" }));
+                }} className={inputCls}>
+                  <option value="">Seleccione un expediente</option>
+                  {filteredMeasureCases.map(c => <option key={c.id} value={c.id}>{c.id} - {c.sentencia || c.imputado || c.delito || "Sin referencia"}</option>)}
+                </select>
+                <p className="text-[11px] text-muted-foreground mt-1">{filteredMeasureCases.length} expediente(s) encontrado(s)</p>
               </div>
+              {selectedCasePreview && (
+                <div className="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-900 px-4 py-3 text-xs">
+                  <div className="font-semibold text-blue-900 dark:text-blue-200">{selectedCasePreview.id}</div>
+                  <div className="mt-1 text-blue-800 dark:text-blue-300">{selectedCasePreview.delito || "Sin delito registrado"} · {selectedCasePreview.estReg || "Sin estado"}</div>
+                  <div className="mt-1 text-blue-700 dark:text-blue-400">{selectedCaseDefendants.length} imputado(s) asociado(s)</div>
+                </div>
+              )}
               <div>
                 <label className={labelCls}>Imputado<span className="text-red-500">*</span></label>
-                <input value={measureForm.imputado} onChange={e => setMeasureForm(p => ({ ...p, imputado: e.target.value }))} className={inputCls} placeholder="Nombre del imputado" />
+                <select value={measureForm.imputado} onChange={e => setMeasureForm(p => ({ ...p, imputado: e.target.value }))} className={inputCls}>
+                  <option value="">Seleccione un imputado</option>
+                  {selectedCaseDefendants.map(d => <option key={d.id} value={d.nombre}>{d.nombre}</option>)}
+                </select>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
@@ -3683,9 +5065,14 @@ const tipoDocIcon = (tipo: string) => {
   return "text-slate-600 bg-slate-100";
 };
 
-function DocumentsView({ setView }: { setView: (v: View) => void }) {
-  type DocRow = typeof docsData[0];
-  const [docs, setDocs] = useState<DocRow[]>(docsData);
+function DocumentsView({ setView, currentUser }: { setView: (v: View) => void; currentUser: SessionUser }) {
+  type DocRow = typeof docsData[0] & { ruta?: string };
+  const [docs, setDocs] = useState<DocRow[]>([]);
+  const [caseOptions, setCaseOptions] = useState<typeof recentCases>([]);
+  const [uploadForm, setUploadForm] = useState({ exp: "", descripcion: "", fileName: "" });
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadCaseSearch, setUploadCaseSearch] = useState("");
+  const [uploadCasePickerOpen, setUploadCasePickerOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [filterTipo, setFilterTipo] = useState("Todos");
   const [filterExp, setFilterExp] = useState("");
@@ -3693,6 +5080,229 @@ function DocumentsView({ setView }: { setView: (v: View) => void }) {
   const [showUpload, setShowUpload] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [dialog, setDialog] = useState<null | {
+    title: string;
+    message: string;
+    variant?: "info" | "danger";
+    confirmLabel?: string;
+    cancelLabel?: string;
+    onConfirm: () => void;
+    onCancel?: () => void;
+  }>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    supabase
+      .from("documentos")
+      .select("*")
+      .limit(1000)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error("Error cargando documentos:", error);
+          setDocs([]);
+          return;
+        }
+        setDocs((data ?? []).map((row, idx) => ({
+          id: firstId(idx + 1, row.id, row.documento_id),
+          nombre: firstText(row.nombre_archivo, row.nombre, row.filename, row.titulo),
+          tipo: firstText(row.tipo_archivo, row.tipo, row.extension).toUpperCase(),
+          peso: firstText(row.peso, row.tamano, row.size),
+          exp: firstText(row.numero_expediente, row.expediente, row.expediente_id),
+          imputado: firstText(row.imputado, row.nombre_imputado),
+          descripcion: firstText(row.descripcion, row.observacion),
+          subidoPor: firstText(row.subido_por, row.usuario, row.created_by),
+          fecha: formatDateTime(row.fecha_subida, row.fecha, row.created_at),
+          version: firstId(1, row.version),
+          ruta: firstText(row.ruta_storage, row.storage_path, row.path),
+        })));
+      });
+
+    supabase
+      .from("expedientes")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(500)
+      .then(({ data }) => {
+        if (active) setCaseOptions((data ?? []).map(mapExpedienteRow));
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const uploadInputId = "ucaprec-document-file";
+
+  const uploadCaseOptions = useMemo(() => {
+    const q = uploadCaseSearch.trim().toLowerCase();
+    if (!q) return caseOptions;
+    return caseOptions.filter(c =>
+      c.id.toLowerCase().includes(q) ||
+      c.sentencia.toLowerCase().includes(q) ||
+      c.imputado.toLowerCase().includes(q) ||
+      c.delito.toLowerCase().includes(q)
+    );
+  }, [caseOptions, uploadCaseSearch]);
+
+  const selectedUploadCase = useMemo(
+    () => caseOptions.find(c => c.id === uploadForm.exp),
+    [caseOptions, uploadForm.exp]
+  );
+
+  const showDocumentMessage = (title: string, message: string, variant: "info" | "danger" = "info") => {
+    setDialog({
+      title,
+      message,
+      variant,
+      confirmLabel: "Aceptar",
+      onConfirm: () => setDialog(null),
+    });
+  };
+
+  const getDocumentUrl = async (doc: DocRow) => {
+    if (!doc.ruta) {
+      showDocumentMessage("Documento no disponible", "Este documento no tiene una ruta de archivo asociada en Storage.", "danger");
+      return "";
+    }
+
+    const { data, error } = await supabase.storage.from("documentos").createSignedUrl(doc.ruta, 60 * 5);
+    if (error || !data?.signedUrl) {
+      console.error("Error generando enlace del documento:", error);
+      showDocumentMessage("No se pudo abrir el documento", "No fue posible generar el enlace privado del archivo. Verifique que exista en Storage.", "danger");
+      return "";
+    }
+
+    return data.signedUrl;
+  };
+
+  const previewDocument = async (doc: DocRow) => {
+    const url = await getDocumentUrl(doc);
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const downloadDocument = async (doc: DocRow) => {
+    const url = await getDocumentUrl(doc);
+    if (!url) return;
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = doc.nombre;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  const handleUploadDocument = async () => {
+    if (!uploadForm.exp) {
+      showDocumentMessage("Seleccione un expediente", "Debe seleccionar el expediente asociado antes de subir el documento.", "danger");
+      return;
+    }
+
+    if (!uploadFile) {
+      showDocumentMessage("Seleccione un archivo", "Debe seleccionar un archivo antes de subir el documento.", "danger");
+      return;
+    }
+
+    const fileName = uploadFile.name;
+    const normalizedName = fileName.trim().toLowerCase();
+    const duplicateInView = docs.some(doc => doc.exp === uploadForm.exp && doc.nombre.trim().toLowerCase() === normalizedName);
+    if (duplicateInView) {
+      showDocumentMessage("Documento duplicado", "Ya existe un documento con esa misma nomenclatura para el expediente seleccionado.", "danger");
+      return;
+    }
+
+    const { data: duplicateRows, error: duplicateError } = await supabase
+      .from("documentos")
+      .select("id")
+      .eq("numero_expediente", uploadForm.exp)
+      .eq("nombre_archivo", fileName)
+      .limit(1);
+
+    if (duplicateError) {
+      console.error("Error validando documento duplicado:", duplicateError);
+      showDocumentMessage("No se pudo validar el documento", "Intente nuevamente antes de subir el archivo.", "danger");
+      return;
+    }
+
+    if ((duplicateRows ?? []).length > 0) {
+      showDocumentMessage("Documento duplicado", "Ya existe un documento con esa misma nomenclatura para el expediente seleccionado.", "danger");
+      return;
+    }
+
+    const ext = fileName.split(".").pop()?.toUpperCase() || "FILE";
+    const selectedCase = caseOptions.find(c => c.id === uploadForm.exp);
+    const storagePath = `${uploadForm.exp}/${Date.now()}-${fileName}`;
+    const { error: storageError } = await supabase.storage.from("documentos").upload(storagePath, uploadFile, { upsert: false });
+    if (storageError) {
+      console.error("Error subiendo documento:", storageError);
+      showDocumentMessage("No se pudo subir el archivo", storageError.message, "danger");
+      return;
+    }
+    const { error } = await supabase.from("documentos").insert({
+      numero_expediente: uploadForm.exp,
+      nombre_archivo: fileName,
+      tipo_archivo: ext,
+      peso: `${(uploadFile.size / 1024 / 1024).toFixed(2)} MB`,
+      imputado: selectedCase?.imputado ?? "",
+      descripcion: uploadForm.descripcion,
+      subido_por: currentUser.username,
+      version: 1,
+      ruta_storage: storagePath,
+    });
+    if (error) {
+      console.error("Error registrando documento:", error);
+      await supabase.storage.from("documentos").remove([storagePath]);
+      showDocumentMessage("No se pudo registrar el documento", error.message, "danger");
+      return;
+    }
+
+    setDocs(prev => [{
+      id: Date.now(),
+      nombre: fileName,
+      tipo: ext,
+      peso: `${(uploadFile.size / 1024 / 1024).toFixed(2)} MB`,
+      exp: uploadForm.exp,
+      imputado: selectedCase?.imputado ?? "",
+      descripcion: uploadForm.descripcion,
+      subidoPor: currentUser.username,
+      fecha: new Date().toLocaleString("es-DO"),
+      version: 1,
+      ruta: storagePath,
+    }, ...prev]);
+    setShowUpload(false);
+    setDragOver(false);
+    setUploadForm({ exp: "", descripcion: "", fileName: "" });
+    setUploadFile(null);
+    setUploadCaseSearch("");
+    setUploadCasePickerOpen(false);
+  };
+
+  const deleteDocument = async () => {
+    if (deleteId === null) return;
+    const target = docs.find(d => d.id === deleteId);
+    if (!target) return;
+
+    const { error } = await supabase
+      .from("documentos")
+      .delete()
+      .eq("numero_expediente", target.exp)
+      .eq("nombre_archivo", target.nombre);
+
+    if (error) {
+      console.error("Error eliminando documento:", error);
+      showDocumentMessage("No se pudo eliminar", error.message, "danger");
+      return;
+    }
+
+    if (target.ruta) {
+      const { error: storageError } = await supabase.storage.from("documentos").remove([target.ruta]);
+      if (storageError) console.error("Error eliminando archivo de Storage:", storageError);
+    }
+
+    setDocs(p => p.filter(d => d.id !== deleteId));
+    setDeleteId(null);
+  };
 
   const filtered = useMemo(() => docs.filter(d => {
     if (filterTipo !== "Todos" && d.tipo !== filterTipo) return false;
@@ -3747,6 +5357,11 @@ function DocumentsView({ setView }: { setView: (v: View) => void }) {
             <input value={filterExp} onChange={e => setFilterExp(e.target.value)} placeholder="EXP-2024-..." className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[130px]" />
           </div>
           <div className="ml-auto flex gap-2 items-center">
+            <Btn variant="secondary" icon={FileSpreadsheet} size="sm" onClick={() => downloadExcel(
+              ["Documento", "Tipo", "Expediente", "Imputado", "Descripción", "Versión", "Subido por", "Fecha", "Tamaño"],
+              filtered.map(doc => [doc.nombre, doc.tipo, doc.exp, doc.imputado, doc.descripcion, doc.version, doc.subidoPor, doc.fecha, doc.peso]),
+              "documentos.xls"
+            )}>Exportar Excel</Btn>
             <div className="flex border border-border rounded-md overflow-hidden">
               <button onClick={() => setViewMode("list")} className={`px-2.5 py-1.5 text-xs transition-colors ${viewMode === "list" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}>Lista</button>
               <button onClick={() => setViewMode("grid")} className={`px-2.5 py-1.5 text-xs transition-colors ${viewMode === "grid" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}>Tarjetas</button>
@@ -3780,14 +5395,14 @@ function DocumentsView({ setView }: { setView: (v: View) => void }) {
               <span className="font-mono text-xs text-muted-foreground whitespace-nowrap">{doc.fecha}</span>,
               <span className="font-mono text-xs text-muted-foreground">{doc.peso}</span>,
               <div className="flex gap-1">
-                <button className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground" title="Vista previa"><Eye size={13} /></button>
-                <button className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground" title="Descargar" onClick={() => downloadCSV(["Documento", "Expediente", "Imputado", "Descripción", "Tamaño", "Subido por", "Fecha"], [[doc.nombre, doc.exp, doc.imputado, doc.descripcion, doc.peso, doc.subidoPor, doc.fecha]], doc.nombre.replace(/\.[^.]+$/, "") + ".csv")}><Download size={13} /></button>
+                <button className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground" title="Vista previa" onClick={() => previewDocument(doc)}><Eye size={13} /></button>
+                <button className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground" title="Descargar" onClick={() => downloadDocument(doc)}><Download size={13} /></button>
                 <button className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground" title="Nueva versión"><Upload size={13} /></button>
                 <button className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-600" title="Eliminar" onClick={() => setDeleteId(doc.id)}><Trash2 size={13} /></button>
               </div>
             ])}
           />
-          <div className="px-4 pb-4"><Pagination /></div>
+          <div className="px-4 pb-4"><Pagination total={filtered.length} /></div>
         </div>
       )}
 
@@ -3807,8 +5422,9 @@ function DocumentsView({ setView }: { setView: (v: View) => void }) {
               </div>
               <p className="font-mono text-[10px] text-primary mt-1.5 cursor-pointer hover:underline" onClick={() => setView("case-detail")}>{doc.exp}</p>
               <div className="flex gap-1 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button className="flex-1 py-1 rounded text-xs bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center gap-1"><Eye size={11} />Ver</button>
-                <button className="flex-1 py-1 rounded text-xs bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center gap-1"><Download size={11} />Descargar</button>
+                <button onClick={() => previewDocument(doc)} className="flex-1 py-1 rounded text-xs bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center gap-1"><Eye size={11} />Ver</button>
+                <button onClick={() => downloadDocument(doc)} className="flex-1 py-1 rounded text-xs bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center gap-1"><Download size={11} />Descargar</button>
+                <button onClick={() => setDeleteId(doc.id)} className="w-8 py-1 rounded text-xs bg-muted text-muted-foreground hover:text-red-600 flex items-center justify-center"><Trash2 size={11} /></button>
               </div>
             </div>
           ))}
@@ -3821,23 +5437,79 @@ function DocumentsView({ setView }: { setView: (v: View) => void }) {
           <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-xl">
             <div className="flex items-center justify-between px-6 py-4 border-b border-border">
               <h2 className="font-semibold text-foreground">Subir Documento</h2>
-              <button onClick={() => { setShowUpload(false); setDragOver(false); }}><X size={16} className="text-muted-foreground" /></button>
+              <button onClick={() => { setShowUpload(false); setDragOver(false); setUploadCaseSearch(""); setUploadCasePickerOpen(false); }}><X size={16} className="text-muted-foreground" /></button>
             </div>
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1 uppercase tracking-wider">Expediente asociado<span className="text-red-500">*</span></label>
-                <input className="w-full px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground" placeholder="Ej. EXP-2024-1847" />
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    value={uploadCasePickerOpen ? uploadCaseSearch : selectedUploadCase ? `${selectedUploadCase.id} - ${selectedUploadCase.sentencia || selectedUploadCase.imputado || selectedUploadCase.delito || "Sin referencia"}` : uploadCaseSearch}
+                    onChange={e => {
+                      setUploadCaseSearch(e.target.value);
+                      setUploadForm(p => ({ ...p, exp: "" }));
+                      setUploadCasePickerOpen(true);
+                    }}
+                    onFocus={() => {
+                      setUploadCasePickerOpen(true);
+                      if (selectedUploadCase && !uploadCaseSearch) setUploadCaseSearch("");
+                    }}
+                    onBlur={() => window.setTimeout(() => setUploadCasePickerOpen(false), 150)}
+                    className="w-full pl-8 pr-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground"
+                    placeholder="Buscar y seleccionar expediente"
+                  />
+                  {uploadCasePickerOpen && (
+                    <div className="absolute z-[80] mt-1 w-full max-h-56 overflow-auto bg-card border border-border rounded-md shadow-lg">
+                      {uploadCaseOptions.length === 0 ? (
+                        <div className="px-3 py-3 text-xs text-muted-foreground">No hay expedientes con esa coincidencia.</div>
+                      ) : uploadCaseOptions.map(c => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onMouseDown={event => event.preventDefault()}
+                          onClick={() => {
+                            setUploadForm(p => ({ ...p, exp: c.id }));
+                            setUploadCaseSearch("");
+                            setUploadCasePickerOpen(false);
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-muted transition-colors"
+                        >
+                          <div className="text-sm font-mono text-primary">{c.id}</div>
+                          <div className="text-xs text-muted-foreground truncate">{c.sentencia || c.imputado || c.delito || "Sin referencia"}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1">{uploadCaseOptions.length} expediente(s) disponible(s){selectedUploadCase ? ` · seleccionado: ${selectedUploadCase.id}` : ""}</p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1 uppercase tracking-wider">Descripción del documento</label>
-                <input className="w-full px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground" placeholder="Ej. Sentencia condenatoria en primera instancia" />
+                <input value={uploadForm.descripcion} onChange={e => setUploadForm(p => ({ ...p, descripcion: e.target.value }))} className="w-full px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground" placeholder="Ej. Sentencia condenatoria en primera instancia" />
               </div>
+              <input
+                id={uploadInputId}
+                type="file"
+                className="hidden"
+                onChange={e => {
+                  const file = e.target.files?.[0] ?? null;
+                  setUploadFile(file);
+                  setUploadForm(p => ({ ...p, fileName: file?.name ?? "" }));
+                }}
+              />
 
               {/* Drop zone */}
               <div
                 onDragOver={e => { e.preventDefault(); setDragOver(true); }}
                 onDragLeave={() => setDragOver(false)}
-                onDrop={e => { e.preventDefault(); setDragOver(false); }}
+                onDrop={e => {
+                  e.preventDefault();
+                  setDragOver(false);
+                  const file = e.dataTransfer.files?.[0] ?? null;
+                  setUploadFile(file);
+                  setUploadForm(p => ({ ...p, fileName: file?.name ?? "" }));
+                }}
                 className={`border-2 border-dashed rounded-lg p-8 flex flex-col items-center gap-3 transition-colors cursor-pointer
                   ${dragOver ? "border-primary bg-primary/5" : "border-border hover:border-primary/40 hover:bg-muted/30"}`}
               >
@@ -3846,7 +5518,8 @@ function DocumentsView({ setView }: { setView: (v: View) => void }) {
                   <p className="text-sm font-medium text-foreground">Arrastre el archivo aquí o haga clic para seleccionar</p>
                   <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, XLSX, JPG, PNG — Máximo 20 MB por archivo</p>
                 </div>
-                <Btn variant="secondary" size="sm">Seleccionar archivo</Btn>
+                {uploadForm.fileName && <p className="text-xs text-primary font-mono">{uploadForm.fileName}</p>}
+                <Btn variant="secondary" size="sm" onClick={() => document.getElementById(uploadInputId)?.click()}>Seleccionar archivo</Btn>
               </div>
 
               <div className="flex items-start gap-2 px-3 py-2.5 bg-amber-50 dark:bg-amber-900/15 border border-amber-200 dark:border-amber-900/30 rounded-lg">
@@ -3857,8 +5530,8 @@ function DocumentsView({ setView }: { setView: (v: View) => void }) {
               </div>
             </div>
             <div className="flex gap-2 justify-end px-6 pb-5">
-              <Btn variant="secondary" onClick={() => { setShowUpload(false); setDragOver(false); }}>Cancelar</Btn>
-              <Btn icon={Upload} onClick={() => { setShowUpload(false); setDragOver(false); }}>Subir Documento</Btn>
+              <Btn variant="secondary" onClick={() => { setShowUpload(false); setDragOver(false); setUploadFile(null); setUploadForm({ exp: "", descripcion: "", fileName: "" }); setUploadCaseSearch(""); setUploadCasePickerOpen(false); }}>Cancelar</Btn>
+              <Btn icon={Upload} onClick={handleUploadDocument}>Subir Documento</Btn>
             </div>
           </div>
         </div>
@@ -3878,11 +5551,22 @@ function DocumentsView({ setView }: { setView: (v: View) => void }) {
             <p className="text-sm text-foreground mb-6">¿Está seguro que desea eliminar este documento? Esta acción no se puede deshacer.</p>
             <div className="flex gap-2 justify-end">
               <Btn variant="secondary" onClick={() => setDeleteId(null)}>Cancelar</Btn>
-              <Btn variant="danger" icon={Trash2} onClick={() => { setDocs(p => p.filter(d => d.id !== deleteId)); setDeleteId(null); }}>Eliminar</Btn>
+              <Btn variant="danger" icon={Trash2} onClick={deleteDocument}>Eliminar</Btn>
             </div>
           </div>
         </div>
       )}
+
+      <ActionDialog
+        open={dialog !== null}
+        title={dialog?.title ?? ""}
+        message={dialog?.message ?? ""}
+        variant={dialog?.variant ?? "info"}
+        confirmLabel={dialog?.confirmLabel ?? "Aceptar"}
+        cancelLabel={dialog?.cancelLabel}
+        onConfirm={dialog?.onConfirm ?? (() => setDialog(null))}
+        onCancel={dialog?.onCancel}
+      />
     </div>
   );
 }
@@ -3890,60 +5574,113 @@ function DocumentsView({ setView }: { setView: (v: View) => void }) {
 // ─── Reports View ─────────────────────────────────────────────────────────────
 
 function ReportsView() {
-  const reports = [
-    { name: "Expedientes por Estatus", desc: "Lista completa de expedientes agrupados por estado del imputado", icon: FolderOpen, color: "text-blue-600 bg-blue-50 dark:bg-blue-900/20" },
-    { name: "Prófugos y Rebeldes Activos", desc: "Reporte operativo de imputados en fuga o rebeldía con alertas vigentes", icon: UserX, color: "text-red-600 bg-red-50 dark:bg-red-900/20" },
-    { name: "Alertas Activas por Tipo", desc: "Consolidado de alertas rojas, migratorias y órdenes de arresto vigentes", icon: AlertOctagon, color: "text-amber-600 bg-amber-50 dark:bg-amber-900/20" },
-    { name: "Casos por Jurisdicción", desc: "Distribución geográfica de expedientes por provincia y municipio", icon: MapPin, color: "text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20" },
-    { name: "Casos por Analista", desc: "Carga de trabajo y rendimiento de analistas asignados", icon: Users, color: "text-violet-600 bg-violet-50 dark:bg-violet-900/20" },
-    { name: "Evolución Temporal", desc: "Tendencia de recepción e ingreso de casos en el tiempo", icon: TrendingUp, color: "text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20" },
-    { name: "Sanciones Económicas", desc: "Reporte de multas, decomisos, indemnizaciones y garantías económicas", icon: Scale, color: "text-teal-600 bg-teal-50 dark:bg-teal-900/20" },
-    { name: "Auditoría de Usuarios", desc: "Actividad de usuarios: accesos, modificaciones y exportaciones", icon: Database, color: "text-slate-600 bg-slate-50 dark:bg-slate-900/20" },
-  ];
+  const [caseNumber, setCaseNumber] = useState("");
+  const [status, setStatus] = useState("Todos");
+  const [loading, setLoading] = useState(false);
+  const [reportRows, setReportRows] = useState<DbRow[]>([]);
+  const [error, setError] = useState("");
+
+  const loadFullCaseReport = async () => {
+    setLoading(true);
+    setError("");
+
+    let query = supabase.from("expedientes").select("*").limit(5000);
+    if (caseNumber.trim()) {
+      query = query.or(`numero_expediente.ilike.%${caseNumber.trim()}%,numero_sentencia.ilike.%${caseNumber.trim()}%`);
+    }
+    if (status !== "Todos") {
+      query = query.eq("estado_registro", status);
+    }
+
+    const { data, error: queryError } = await query;
+    setLoading(false);
+
+    if (queryError) {
+      setReportRows([]);
+      setError(queryError.message);
+      return;
+    }
+
+    setReportRows(data ?? []);
+  };
+
+  const exportFullCaseReport = () => {
+    const rows = reportRows;
+    const headers = Array.from(new Set(rows.flatMap(row => Object.keys(row))));
+    if (headers.length === 0) {
+      setError("No hay datos para exportar. Genere el reporte primero.");
+      return;
+    }
+    downloadExcel(
+      headers,
+      rows.map(row => headers.map(header => {
+        const value = row[header];
+        return typeof value === "object" && value !== null ? JSON.stringify(value) : value;
+      })),
+      "reporte-expedientes-completo.xls"
+    );
+  };
+
   return (
     <div className="p-6">
       <SectionHeader
-        title="Reportes y Exportaciones"
-        sub="Generación de reportes con identidad institucional en PDF y Excel"
+        title="Generador de Reportes"
+        sub="Exportación completa de expedientes con todas las variables disponibles"
       />
-      <div className="flex flex-wrap gap-3 mb-6 px-4 py-3 bg-card border border-border rounded-lg">
-        <div className="flex flex-col gap-0.5">
-          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Período</label>
-          <select className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[160px]">
-            {["Nov 2024", "Oct 2024", "2024 (completo)", "2023", "Personalizado"].map(o => <option key={o}>{o}</option>)}
-          </select>
-        </div>
-        <div className="flex flex-col gap-0.5">
-          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Jurisdicción</label>
-          <select className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[160px]">
-            <option>Todas</option>
-            {JURISDICCIONES.map(j => <option key={j}>{j}</option>)}
-          </select>
-        </div>
-        <div className="flex flex-col gap-0.5">
-          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Analista</label>
-          <select className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[140px]">
-            <option>Todos</option>
-            {["Ana Rodríguez", "Luis Peña", "María Santos", "Pedro Álvarez"].map(a => <option key={a}>{a}</option>)}
-          </select>
-        </div>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {reports.map(r => (
-          <div key={r.name} className="bg-card border border-border rounded-lg p-4 hover:shadow-sm transition-shadow flex flex-col gap-3">
-            <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${r.color}`}>
-              <r.icon size={17} />
-            </div>
-            <div>
-              <p className="font-medium text-foreground text-sm">{r.name}</p>
-              <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{r.desc}</p>
-            </div>
-            <div className="flex gap-2 mt-auto">
-              <Btn variant="secondary" size="sm" icon={Printer} onClick={triggerPrint}>PDF</Btn>
-              <Btn variant="secondary" size="sm" icon={FileSpreadsheet} onClick={() => downloadCSV(["Reporte"], [[r.name]], `${r.name.replace(/ /g,"-")}.csv`)}>Excel</Btn>
-            </div>
+
+      <div className="bg-card border border-border rounded-lg p-5 mb-5">
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_220px_auto_auto] gap-3 items-end">
+          <div>
+            <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Expediente o sentencia</label>
+            <input value={caseNumber} onChange={e => setCaseNumber(e.target.value)} className="mt-1 w-full px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground" placeholder="Buscar por expediente o sentencia" />
           </div>
-        ))}
+          <div>
+            <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Estado del registro</label>
+            <select value={status} onChange={e => setStatus(e.target.value)} className="mt-1 w-full px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground">
+              <option>Todos</option>
+              {ESTADOS_REGISTRO.map(item => <option key={item}>{item}</option>)}
+            </select>
+          </div>
+          <Btn icon={RefreshCw} onClick={loadFullCaseReport}>{loading ? "Generando..." : "Generar"}</Btn>
+          <Btn variant="secondary" icon={FileSpreadsheet} onClick={exportFullCaseReport}>Exportar Excel</Btn>
+        </div>
+        {error && <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">{error}</div>}
+      </div>
+
+      <div className="bg-card border border-border rounded-lg overflow-hidden">
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-foreground text-sm">Reporte de Expedientes Completos</h3>
+            <p className="text-xs text-muted-foreground mt-1">{reportRows.length} expediente(s) en el reporte</p>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          {reportRows.length === 0 ? (
+            <div className="py-14 text-center text-sm text-muted-foreground">Genere un reporte para visualizar y exportar los datos.</div>
+          ) : (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  {Object.keys(reportRows[0]).map(header => (
+                    <th key={header} className="text-left py-2.5 px-4 font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">{header}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {reportRows.slice(0, 25).map((row, index) => (
+                  <tr key={index} className="border-b border-border/50 hover:bg-muted/20">
+                    {Object.keys(reportRows[0]).map(header => (
+                      <td key={header} className="py-2.5 px-4 text-foreground whitespace-nowrap max-w-[220px] truncate">
+                        {typeof row[header] === "object" && row[header] !== null ? JSON.stringify(row[header]) : String(row[header] ?? "")}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div className="px-4 pb-4"><Pagination total={reportRows.length} pageSize={25} /></div>
       </div>
     </div>
   );
@@ -4392,13 +6129,18 @@ const VIEW_TITLES: Record<View, string> = {
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [view, setView] = useState<View>("dashboard");
   const [dark, setDark] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [caseFormStartTab, setCaseFormStartTab] = useState(0);
   const [autoOpenAddDefModal, setAutoOpenAddDefModal] = useState(false);
+  const [selectedCaseId, setSelectedCaseId] = useState("");
   const [selectedDefendantCaseId, setSelectedDefendantCaseId] = useState("");
   const [selectedNotificationCaseId, setSelectedNotificationCaseId] = useState("");
+  const [reviewCaseCount, setReviewCaseCount] = useState(0);
+  const canAccessAdmin = currentUser ? isAdminRole(currentUser.role) : false;
 
   // ── Navigation history ──
   const [navHist, setNavHist] = useState<View[]>(["dashboard"]);
@@ -4435,7 +6177,55 @@ export default function App() {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
 
+  useEffect(() => {
+    let active = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      setCurrentUser(data.session?.user ? sessionUserFromAuthUser(data.session.user) : null);
+      setAuthLoading(false);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCurrentUser(session?.user ? sessionUserFromAuthUser(session.user) : null);
+      setAuthLoading(false);
+    });
+
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    supabase
+      .from("expedientes")
+      .select("id", { count: "exact", head: true })
+      .eq("estado_registro", "En Revisión")
+      .then(({ count }) => {
+        if (active) setReviewCaseCount(count ?? 0);
+      });
+    return () => {
+      active = false;
+    };
+  }, [view]);
+
+  const handleLogin = useCallback((sessionUser: SessionUser, remember: boolean) => {
+    void remember;
+    setCurrentUser(sessionUser);
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    await supabase.auth.signOut();
+    setCurrentUser(null);
+    setView("dashboard");
+    setNavHist(["dashboard"]);
+    setHistIdx(0);
+  }, []);
+
   const openAddImputadoFromDefendants = useCallback((caseId: string) => {
+    setSelectedCaseId("");
     setSelectedNotificationCaseId("");
     setSelectedDefendantCaseId(caseId);
     setCaseFormStartTab(1);
@@ -4443,7 +6233,17 @@ export default function App() {
     navigate("case-form");
   }, [navigate]);
 
+  const openCaseFromList = useCallback((caseId: string, mode: "detail" | "form" = "detail") => {
+    setSelectedCaseId(caseId);
+    setSelectedDefendantCaseId("");
+    setSelectedNotificationCaseId("");
+    setCaseFormStartTab(0);
+    setAutoOpenAddDefModal(false);
+    navigate(mode === "form" ? "case-form" : "case-detail");
+  }, [navigate]);
+
   const openCaseFromNotification = useCallback((caseId: string) => {
+    setSelectedCaseId("");
     setSelectedDefendantCaseId("");
     setSelectedNotificationCaseId(caseId);
     setCaseFormStartTab(0);
@@ -4456,25 +6256,30 @@ export default function App() {
   }, [navigate]);
 
   const renderView = () => {
+    if (ADMIN_ONLY_VIEWS.includes(view) && !canAccessAdmin) {
+      return <DashboardView setView={navigate} />;
+    }
+
     switch (view) {
       case "dashboard": return <DashboardView setView={navigate} />;
-      case "cases": return <CasesView setView={navigate} />;
-      case "case-detail": return <CaseDetailView setView={navigate} mode="detail" />;
+      case "cases": return <CasesView setView={navigate} openCase={openCaseFromList} />;
+      case "case-detail": return <CaseDetailView setView={navigate} mode="detail" selectedCaseId={selectedCaseId} currentUser={currentUser} />;
       case "case-form": return (
         <CaseDetailView
           setView={navigate}
           mode="form"
+          currentUser={currentUser}
           initialTab={caseFormStartTab}
           autoOpenAddDefModal={autoOpenAddDefModal}
-          selectedCaseId={selectedNotificationCaseId || selectedDefendantCaseId}
+          selectedCaseId={selectedNotificationCaseId || selectedDefendantCaseId || selectedCaseId}
           onConsumedAutoOpenAddDefModal={() => setAutoOpenAddDefModal(false)}
         />
       );
-      case "case-new": return <NewCaseView setView={navigate} />;
+      case "case-new": return <NewCaseView setView={navigate} currentUser={currentUser} />;
       case "defendants": return <DefendantsView setView={navigate} openAddImputado={openAddImputadoFromDefendants} />;
       case "victims": return <VictimsView setView={navigate} />;
       case "measures": return <MeasuresView setView={navigate} />;
-      case "documents": return <DocumentsView setView={navigate} />;
+      case "documents": return <DocumentsView setView={navigate} currentUser={currentUser} />;
       case "notifications": return <NotificationsView openCaseFromNotification={openCaseFromNotification} />;
       case "reports": return <ReportsView />;
       case "analytics": return <AnalyticsView />;
@@ -4486,9 +6291,31 @@ export default function App() {
     }
   };
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#f4f7fb] flex items-center justify-center text-sm text-slate-500">
+        Validando sesión institucional...
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <LoginPage onLogin={handleLogin} />;
+  }
+
   return (
     <div className="flex h-screen overflow-hidden bg-background" style={{ fontFamily: "'Inter', sans-serif" }}>
-      <Sidebar view={view} setView={navigate} navigateModule={navigateModule} collapsed={collapsed} setCollapsed={setCollapsed} />
+      <Sidebar
+        view={view}
+        setView={navigate}
+        navigateModule={navigateModule}
+        collapsed={collapsed}
+        setCollapsed={setCollapsed}
+        currentUser={currentUser}
+        onLogout={handleLogout}
+        canAccessAdmin={canAccessAdmin}
+        reviewCount={reviewCaseCount}
+      />
       <div className="flex-1 flex flex-col overflow-hidden">
         <TopBar
           title={VIEW_TITLES[view]}
@@ -4501,6 +6328,7 @@ export default function App() {
           breadcrumb={breadcrumb}
           openCaseFromNotification={openCaseFromNotification}
           openNotificationsCenter={openNotificationsCenter}
+          canAccessAdmin={canAccessAdmin}
         />
         <main className="flex-1 overflow-y-auto">
           {renderView()}
