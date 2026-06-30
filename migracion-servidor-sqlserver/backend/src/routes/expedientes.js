@@ -51,6 +51,7 @@ expedientesRouter.post("/", async (req, res, next) => {
     const saved = await withTransaction(async (transaction) => {
       const request = txRequest(transaction, {
         numero_expediente: expediente.numero_expediente,
+        codigo_estructurado: expediente.codigo_estructurado,
         numero_sentencia: expediente.numero_sentencia,
         tipo_expediente: expediente.tipo_expediente,
         jurisdiccion: expediente.jurisdiccion,
@@ -64,12 +65,12 @@ expedientesRouter.post("/", async (req, res, next) => {
 
       const result = await request.query(
         `insert into ucaprec.expedientes (
-          numero_expediente, numero_sentencia, tipo_expediente, jurisdiccion, fecha_recepcion,
+          numero_expediente, codigo_estructurado, numero_sentencia, tipo_expediente, jurisdiccion, fecha_recepcion,
           estado_registro, asignado_a, creado_por, delito_principal, observacion
         )
         output inserted.*
         values (
-          @numero_expediente, @numero_sentencia, @tipo_expediente, @jurisdiccion, @fecha_recepcion,
+          @numero_expediente, @codigo_estructurado, @numero_sentencia, @tipo_expediente, @jurisdiccion, @fecha_recepcion,
           @estado_registro, @asignado_a, @creado_por, @delito_principal, @observacion
         )`
       );
@@ -139,6 +140,7 @@ expedientesRouter.put("/:numero", async (req, res, next) => {
     const result = await runQuery(
       `update ucaprec.expedientes
        set numero_expediente = @nextNumero,
+           codigo_estructurado = @codigo_estructurado,
            numero_sentencia = @numero_sentencia,
            tipo_expediente = @tipo_expediente,
            jurisdiccion = @jurisdiccion,
@@ -162,6 +164,7 @@ expedientesRouter.put("/:numero", async (req, res, next) => {
       {
         numero: req.params.numero,
         nextNumero,
+        codigo_estructurado: expediente.codigo_estructurado ?? null,
         numero_sentencia: expediente.numero_sentencia ?? null,
         tipo_expediente: expediente.tipo_expediente ?? null,
         jurisdiccion: expediente.jurisdiccion ?? null,

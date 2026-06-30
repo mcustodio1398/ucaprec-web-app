@@ -206,6 +206,41 @@ const toDateInputValue = (...values: any[]) => {
   return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
 };
 
+const normalizeStructuredSegment = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toUpperCase();
+
+const buildStructuredCaseId = (sentenceOrResolution: string, dateValue = new Date(), sequence?: string | number) => {
+  const date = dateValue instanceof Date && !Number.isNaN(dateValue.getTime()) ? dateValue : new Date();
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const seq = String(sequence ?? "000000").padStart(6, "0");
+  const reference = normalizeStructuredSegment(sentenceOrResolution || "SIN-RESOLUCION");
+  return `UC-EXP-${y}${m}${d}-${seq}-${reference}`;
+};
+
+const dateFromDisplayValue = (value: string) => {
+  const match = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!match) return new Date();
+  const [, day, month, year] = match;
+  const date = new Date(Number(year), Number(month) - 1, Number(day));
+  return Number.isNaN(date.getTime()) ? new Date() : date;
+};
+
+const structuredIdForCase = (expediente: { codigo?: string; sentencia?: string; id?: string; fecha?: string }) =>
+  expediente.codigo || buildStructuredCaseId(expediente.sentencia || expediente.id || "SIN-RESOLUCION", dateFromDisplayValue(expediente.fecha || ""));
+
+const describeFieldChanges = (changes: Array<{ campo: string; antes?: string | number | boolean | null; despues?: string | number | boolean | null }>) => {
+  const clean = changes.filter(change => String(change.antes ?? "") !== String(change.despues ?? ""));
+  if (clean.length === 0) return "No se detectaron cambios de campos.";
+  return clean.map(change => `${change.campo}: "${change.antes ?? "N/D"}" → "${change.despues ?? "N/D"}"`).join("; ");
+};
+
 const todayLong = () => new Date().toLocaleDateString("es-DO", {
   day: "2-digit",
   month: "long",
@@ -218,8 +253,9 @@ const monthLabel = (value: string) => {
   return date.toLocaleDateString("es-DO", { month: "short" }).replace(".", "");
 };
 
-const mapExpedienteRow = (row: DbRow, idx: number): typeof recentCases[number] => ({
+const mapExpedienteRow = (row: DbRow, idx: number): typeof recentCases[number] & { codigo?: string } => ({
   id: firstText(row.numero_expediente, row.no_expediente, row.codigo, row.expediente, row.id, `EXP-${idx + 1}`),
+  codigo: firstText(row.codigo_estructurado),
   sentencia: firstText(row.numero_sentencia, row.no_sentencia, row.sentencia, row.referencia_sentencia),
   imputado: firstText(row.imputado_principal, row.imputado, row.nombre_imputado),
   delito: firstText(row.delito_principal, row.delito, row.infraccion),
@@ -356,6 +392,20 @@ function downloadExcel(headers: string[], rows: (string | number | boolean | nul
 
 function triggerPrint() { window.print(); }
 
+let cachedClientIp = "";
+
+async function getClientIp() {
+  if (cachedClientIp) return cachedClientIp;
+  try {
+    const response = await fetch("https://api.ipify.org?format=json", { cache: "no-store" });
+    const data = await response.json();
+    cachedClientIp = firstText(data?.ip, "No disponible");
+  } catch {
+    cachedClientIp = "No disponible";
+  }
+  return cachedClientIp;
+}
+
 async function logAuditEvent(event: {
   usuario: string;
   accion: string;
@@ -363,6 +413,7 @@ async function logAuditEvent(event: {
   entidad?: string;
   detalle?: string;
   tipo?: "create" | "update" | "export" | "security" | "info";
+  ip?: string;
 }) {
   const { error } = await supabase.from("auditoria").insert({
     usuario: event.usuario,
@@ -371,7 +422,7 @@ async function logAuditEvent(event: {
     entidad: event.entidad ?? "",
     detalle: event.detalle ?? "",
     tipo: event.tipo ?? "info",
-    ip: "N/D",
+    ip: event.ip ?? await getClientIp(),
   });
   if (error) console.error("Error registrando auditoría:", error);
 }
@@ -435,6 +486,8 @@ const ADMIN_MENU: { id: View; label: string; icon: any }[] = [
   { id: "catalogs", label: "Catálogos", icon: BookOpen },
   { id: "settings", label: "Configuración", icon: Settings },
 ];
+
+const ADMIN_LOGOUT_ITEM = { label: "Cerrar Sesión", icon: LogOut };
 
 const ADMIN_ONLY_VIEWS: View[] = ["users", "audit", "catalogs", "settings", "analytics"];
 const isAdminRole = (role: string) => role.toLowerCase() === "administrador";
@@ -906,10 +959,11 @@ function TopBar({
   openCaseFromNotification,
   openNotificationsCenter,
   canAccessAdmin,
+  onLogout,
 }: {
   title: string; dark: boolean; setDark: (b: boolean) => void; setView: (v: View) => void;
   navigateModule: (v: View) => void; goBack: () => void; canGoBack: boolean; breadcrumb: View[];
-  openCaseFromNotification: (caseId: string) => void; openNotificationsCenter: () => void; canAccessAdmin: boolean;
+  openCaseFromNotification: (caseId: string) => void; openNotificationsCenter: () => void; canAccessAdmin: boolean; onLogout: () => void;
 }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
@@ -1055,6 +1109,17 @@ function TopBar({
                     </button>
                   );
                 })}
+                <div className="my-1 border-t border-border" />
+                <button
+                  onClick={() => {
+                    setAdminMenuOpen(false);
+                    onLogout();
+                  }}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                >
+                  <ADMIN_LOGOUT_ITEM.icon size={15} className="flex-shrink-0" />
+                  <span className="truncate">{ADMIN_LOGOUT_ITEM.label}</span>
+                </button>
               </div>
             </div>
           )}
@@ -1388,7 +1453,7 @@ const [filters, setFilters] = useState({
         subidos_a_pn: defendantsForCases.filter(d => d.policia).length,
       })
       setDashboardCases(filteredCases.slice(0, 5))
-      setDashboardExportRows(filteredCases.map(c => [c.id, c.sentencia, c.imputado, c.delito, c.tipo, c.estatus, c.alerta, c.estReg, c.asignado, c.fecha]))
+      setDashboardExportRows(filteredCases.map(c => [structuredIdForCase(c), c.id, c.sentencia, c.imputado, c.delito, c.tipo, c.estatus, c.alerta, c.estReg, c.asignado, c.fecha]))
       setDashboardEvolution(Object.entries(byMonth).map(([mes, casos]) => ({ mes, casos })))
       setDashboardStatusPie(Object.entries(statusCounts).map(([name, value]) => ({ name, value, color: colors[name] ?? "#1D4ED8" })))
       setDashboardDistricts(Object.entries(byDistrict).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, casos]) => ({ name, casos })))
@@ -1616,7 +1681,7 @@ const exportDashboardReport = () => {
             <Btn variant={showFilters ? "primary" : "secondary"} icon={Filter} size="sm" onClick={() => setShowFilters(value => !value)}>Filtros</Btn>
             <Btn variant="secondary" icon={RefreshCw} size="sm" onClick={() => setDashboardRefresh(value => value + 1)}>{dashboardLoading ? "Actualizando..." : "Actualizar"}</Btn>
             <Btn variant="secondary" icon={FileSpreadsheet} size="sm" onClick={() => downloadExcel(
-              ["Expediente", "No. Sentencia", "Imputado", "Delito", "Tipo", "Estatus", "Alerta", "Estado Reg.", "Asignado", "Fecha"],
+              ["ID UCAPREC", "Expediente", "No. Sentencia", "Imputado", "Delito", "Tipo", "Estatus", "Alerta", "Estado Reg.", "Asignado", "Fecha"],
               dashboardExportRows,
               "dashboard_filtrado.xls"
             )}>Exportar Excel</Btn>
@@ -2007,7 +2072,14 @@ const exportDashboardReport = () => {
 
 // ─── Cases View ───────────────────────────────────────────────────────────────
 
-function CasesView({ setView, openCase, currentUser }: { setView: (v: View) => void; openCase: (caseId: string, mode?: "detail" | "form") => void; currentUser: SessionUser }) {
+function CasesView({ setView, openCase, currentUser, canCreateCases, canEditCases, canDeleteCases }: {
+  setView: (v: View) => void;
+  openCase: (caseId: string, mode?: "detail" | "form") => void;
+  currentUser: SessionUser;
+  canCreateCases: boolean;
+  canEditCases: boolean;
+  canDeleteCases: boolean;
+}) {
   const [search, setSearch] = useState("");
   const [filterRecordStatus, setFilterRecordStatus] = useState("Todos");
   const [filterStatus, setFilterStatus] = useState("Todos");
@@ -2113,7 +2185,7 @@ function CasesView({ setView, openCase, currentUser }: { setView: (v: View) => v
       <SectionHeader
         title="Gestión de Expedientes"
         sub={`${filtered.length} de ${cases.length} expedientes mostrados`}
-        action={<Btn icon={Plus} onClick={() => setView("case-new")}>Nuevo Expediente</Btn>}
+        action={canCreateCases ? <Btn icon={Plus} onClick={() => setView("case-new")}>Nuevo Expediente</Btn> : undefined}
       />
 
       {/* Resumen de estatus de registro */}
@@ -2184,8 +2256,8 @@ function CasesView({ setView, openCase, currentUser }: { setView: (v: View) => v
 
           <div className="flex gap-2 ml-auto">
             <Btn variant="secondary" icon={Download} size="sm" onClick={() => downloadExcel(
-              ["Expediente", "No. Sentencia", "Imputado", "Delito", "Estatus", "Alerta", "Estado Reg.", "Asignado", "Fecha"],
-              filtered.map(c => [c.id, c.sentencia, c.imputado, c.delito, c.estatus, c.alerta, c.estReg, c.asignado, c.fecha]),
+              ["ID UCAPREC", "Expediente", "No. Sentencia", "Imputado", "Delito", "Estatus", "Alerta", "Estado Reg.", "Asignado", "Fecha"],
+              filtered.map(c => [structuredIdForCase(c), c.id, c.sentencia, c.imputado, c.delito, c.estatus, c.alerta, c.estReg, c.asignado, c.fecha]),
               "expedientes.xls"
             )}>Exportar Excel</Btn>
           </div>
@@ -2274,8 +2346,8 @@ function CasesView({ setView, openCase, currentUser }: { setView: (v: View) => v
               <span className="font-mono text-xs text-muted-foreground">{c.fecha}</span>,
               <div className="flex gap-1">
                 <button title="Ver detalle" className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" onClick={() => openCase(c.id)}><Eye size={13} /></button>
-                <button title="Editar expediente" className="p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 text-muted-foreground hover:text-blue-600 transition-colors" onClick={() => openCase(c.id, "form")}><Edit2 size={13} /></button>
-                <button title="Eliminar expediente" className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-600 transition-colors" onClick={() => confirmDelete(c.id)}><Trash2 size={13} /></button>
+                {canEditCases && <button title="Editar expediente" className="p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 text-muted-foreground hover:text-blue-600 transition-colors" onClick={() => openCase(c.id, "form")}><Edit2 size={13} /></button>}
+                {canDeleteCases && <button title="Eliminar expediente" className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-600 transition-colors" onClick={() => confirmDelete(c.id)}><Trash2 size={13} /></button>}
               </div>
             ])}
           />
@@ -2429,6 +2501,7 @@ function CaseDetailView({
   autoOpenAddDefModal = false,
   selectedCaseId,
   currentUser,
+  canEditCases = true,
   onConsumedAutoOpenAddDefModal,
 }: {
   setView: (v: View) => void;
@@ -2437,9 +2510,10 @@ function CaseDetailView({
   autoOpenAddDefModal?: boolean;
   selectedCaseId?: string;
   currentUser: SessionUser;
+  canEditCases?: boolean;
   onConsumedAutoOpenAddDefModal?: () => void;
 }) {
-  const isEdit = mode === "form";
+  const isEdit = mode === "form" && canEditCases;
   const [tab, setTab] = useState(initialTab);
   const activeCaseId = selectedCaseId?.trim() || "";
   const [caseRecord, setCaseRecord] = useState<DbRow | null>(null);
@@ -2447,6 +2521,8 @@ function CaseDetailView({
   const [caseUploadFile, setCaseUploadFile] = useState<File | null>(null);
   const [caseUploadDescription, setCaseUploadDescription] = useState("");
   const [analystOptions, setAnalystOptions] = useState<string[]>([]);
+  const [locationEdit, setLocationEdit] = useState({ provincia: "", municipio: "", sector: "", direccion: "", delito: "", tiposPenales: "" });
+  const [caseMeasureNotes, setCaseMeasureNotes] = useState("");
   const [generalEdit, setGeneralEdit] = useState({
     numeroExpediente: "",
     fechaRecepcion: "",
@@ -2515,22 +2591,43 @@ function CaseDetailView({
   const handleSaveCaseEdit = async () => {
     if (!activeCaseId) return;
     const nextCaseNumber = generalEdit.numeroExpediente.trim() || activeCaseId;
+    const auditDetail = describeFieldChanges([
+      { campo: "No. expediente", antes: activeCaseId, despues: nextCaseNumber },
+      { campo: "No. sentencia / resolución", antes: firstText(caseRecord?.numero_sentencia), despues: generalEdit.sentencia },
+      { campo: "Tipo expediente", antes: firstText(caseRecord?.tipo_expediente), despues: generalEdit.tipoExpediente },
+      { campo: "Jurisdicción", antes: firstText(caseRecord?.jurisdiccion), despues: generalEdit.jurisdiccion },
+      { campo: "Estado registro", antes: firstText(caseRecord?.estado_registro), despues: generalEdit.estadoRegistro || "En Revisión" },
+      { campo: "Asignado a", antes: firstText(caseRecord?.asignado_a), despues: generalEdit.asignado },
+      { campo: "Provincia", antes: firstText(caseRecord?.provincia), despues: locationEdit.provincia },
+      { campo: "Municipio", antes: firstText(caseRecord?.municipio), despues: locationEdit.municipio },
+      { campo: "Sector", antes: firstText(caseRecord?.sector), despues: locationEdit.sector },
+      { campo: "Observación medidas", antes: caseMeasureNotes, despues: caseMeasureNotes },
+    ]);
+
+    const updatePayload: DbRow = {
+      numero_expediente: nextCaseNumber,
+      fecha_recepcion: generalEdit.fechaRecepcion || null,
+      numero_sentencia: generalEdit.sentencia,
+      tipo_expediente: generalEdit.tipoExpediente,
+      jurisdiccion: generalEdit.jurisdiccion,
+      localidad_jurisdiccion: generalEdit.localidad,
+      fecha_decision: generalEdit.fechaDecision || null,
+      decision: generalEdit.decision,
+      quien_interpone: generalEdit.interpone,
+      estado_registro: generalEdit.estadoRegistro || "En Revisión",
+      asignado_a: generalEdit.asignado,
+      provincia: locationEdit.provincia,
+      municipio: locationEdit.municipio,
+      sector: locationEdit.sector,
+      direccion: locationEdit.direccion,
+      delito_principal: locationEdit.delito,
+      tipos_penales: locationEdit.tiposPenales,
+      updated_at: new Date().toISOString(),
+    };
+
     const { error } = await supabase
       .from("expedientes")
-      .update({
-        numero_expediente: nextCaseNumber,
-        fecha_recepcion: generalEdit.fechaRecepcion || null,
-        numero_sentencia: generalEdit.sentencia,
-        tipo_expediente: generalEdit.tipoExpediente,
-        jurisdiccion: generalEdit.jurisdiccion,
-        localidad_jurisdiccion: generalEdit.localidad,
-        fecha_decision: generalEdit.fechaDecision || null,
-        decision: generalEdit.decision,
-        quien_interpone: generalEdit.interpone,
-        estado_registro: generalEdit.estadoRegistro || "En Revisión",
-        asignado_a: generalEdit.asignado,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updatePayload)
       .eq("numero_expediente", activeCaseId);
 
     if (error) {
@@ -2545,12 +2642,20 @@ function CaseDetailView({
       return;
     }
 
+    if (caseMeasureNotes.trim()) {
+      const { error: measureNoteError } = await supabase
+        .from("medidas_alertas_expediente")
+        .update({ observacion: caseMeasureNotes })
+        .eq("numero_expediente", activeCaseId);
+      if (measureNoteError) console.error("Error actualizando observaciones de medidas:", measureNoteError);
+    }
+
     await logAuditEvent({
       usuario: currentUser.username,
       accion: "EDITAR_EXPEDIENTE",
       modulo: "Expedientes",
       entidad: nextCaseNumber,
-      detalle: `Expediente actualizado. Estado del registro: ${generalEdit.estadoRegistro || "En Revisión"}.`,
+      detalle: auditDetail,
       tipo: "update",
     });
 
@@ -2567,6 +2672,12 @@ function CaseDetailView({
       quien_interpone: generalEdit.interpone,
       estado_registro: generalEdit.estadoRegistro || "En Revisión",
       asignado_a: generalEdit.asignado,
+      provincia: locationEdit.provincia,
+      municipio: locationEdit.municipio,
+      sector: locationEdit.sector,
+      direccion: locationEdit.direccion,
+      delito_principal: locationEdit.delito,
+      tipos_penales: locationEdit.tiposPenales,
     } : prev);
 
     setDialog({
@@ -2724,6 +2835,14 @@ function CaseDetailView({
           estadoRegistro: firstText(expRow.estado_registro, "En Revisión"),
           asignado: firstText(expRow.asignado_a, expRow.analista, expRow.usuario_asignado),
         });
+        setLocationEdit({
+          provincia: firstText(expRow.provincia),
+          municipio: firstText(expRow.municipio),
+          sector: firstText(expRow.sector),
+          direccion: firstText(expRow.direccion),
+          delito: firstText(expRow.delito_principal),
+          tiposPenales: firstText(expRow.tipos_penales),
+        });
       }
 
       const { data: imputadoRows } = await supabase
@@ -2773,6 +2892,14 @@ function CaseDetailView({
           tipo: firstText(row.tipo_persona, "Persona Física"),
           nombre: firstText(row.nombre_completo, row.nombre),
         })));
+      }
+
+      const { data: measureRows } = await supabase
+        .from("medidas_alertas_expediente")
+        .select("*")
+        .eq("numero_expediente", activeCaseId);
+      if (active) {
+        setCaseMeasureNotes(firstText(...(measureRows ?? []).map(row => firstText(row.observacion, row.observaciones, row.descripcion))));
       }
 
       const { data: docRows } = await supabase
@@ -2857,12 +2984,14 @@ function CaseDetailView({
     </div>
   );
   const activeCase = caseRecord ? mapExpedienteRow(caseRecord, 0) : null;
+  const locationMunicipios = useMemo(() => locationEdit.provincia ? getMunicipios(locationEdit.provincia) : [], [locationEdit.provincia]);
+  const locationSectores = useMemo(() => (locationEdit.provincia && locationEdit.municipio) ? getSectores(locationEdit.provincia, locationEdit.municipio) : [], [locationEdit.provincia, locationEdit.municipio]);
 
   // Export helpers for this case
   const exportCaseCSV = () => {
     downloadExcel(
-      ["Expediente", "Sentencia", "Imputado", "Documento", "Estado", "Pena", "Alerta Roja", "Alert. Migratoria", "Orden Arresto"],
-      defs.map(d => [activeCaseId, activeCase?.sentencia ?? "", d.nombre, d.doc, d.estadoImp, d.penaImp, d.alertaRoja ? "Sí" : "No", d.alertaMig ? "Sí" : "No", d.arresto ? "Sí" : "No"]),
+      ["ID UCAPREC", "Expediente", "Sentencia", "Imputado", "Documento", "Estado", "Pena", "Alerta Roja", "Alert. Migratoria", "Orden Arresto"],
+      defs.map(d => [structuredIdForCase({ id: activeCaseId, sentencia: activeCase?.sentencia, fecha: activeCase?.fecha }), activeCaseId, activeCase?.sentencia ?? "", d.nombre, d.doc, d.estadoImp, d.penaImp, d.alertaRoja ? "Sí" : "No", d.alertaMig ? "Sí" : "No", d.arresto ? "Sí" : "No"]),
       `${activeCaseId}.xls`
     );
   };
@@ -3056,7 +3185,7 @@ function CaseDetailView({
           {!isEdit && (
             <>
               <Btn variant="secondary" icon={FileSpreadsheet} size="sm" onClick={exportCaseCSV}>Exportar Excel</Btn>
-              <Btn icon={Edit2} size="sm" onClick={() => setView("case-form")}>Editar</Btn>
+              {canEditCases && <Btn icon={Edit2} size="sm" onClick={() => setView("case-form")}>Editar</Btn>}
             </>
           )}
           {isEdit && (
@@ -3249,7 +3378,7 @@ function CaseDetailView({
                 })}
               </div>
               <div className="border border-border rounded-lg p-4">
-                <Field label="Observaciones de medidas" type="textarea" value={firstText(caseRecord?.observacion)} />
+                <Field label="Observaciones de medidas" type="textarea" value={caseMeasureNotes} onChange={setCaseMeasureNotes} />
               </div>
             </div>
           )}
@@ -3257,15 +3386,62 @@ function CaseDetailView({
           {/* Tab 4: Location */}
           {tab === 4 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              <Field label="Provincia" value={firstText(caseRecord?.provincia)} />
-              <Field label="Municipio" value={firstText(caseRecord?.municipio)} />
-              <Field label="Sector" value={firstText(caseRecord?.sector)} />
-              <div className="sm:col-span-2 lg:col-span-3">
-                <Field label="Dirección Detallada" value={firstText(caseRecord?.direccion)} type="textarea" />
+              <div>
+                <label className={labelCls}>Provincia</label>
+                <select
+                  disabled={!isEdit}
+                  value={locationEdit.provincia}
+                  onChange={event => setLocationEdit(prev => ({ ...prev, provincia: event.target.value, municipio: "", sector: "" }))}
+                  className={inputCls}
+                >
+                  <option value="">Seleccione una provincia</option>
+                  <option value="N/A">N/A</option>
+                  {PROVINCIAS.map(provincia => <option key={provincia} value={provincia}>{provincia}</option>)}
+                </select>
               </div>
-              <Field label="Delito Principal" value={activeCase?.delito} />
+              <div>
+                <label className={labelCls}>Municipio</label>
+                <select
+                  disabled={!isEdit}
+                  value={locationEdit.municipio}
+                  onChange={event => setLocationEdit(prev => ({ ...prev, municipio: event.target.value, sector: "" }))}
+                  className={inputCls}
+                >
+                  <option value="">Seleccione un municipio</option>
+                  <option value="N/A">N/A</option>
+                  {locationMunicipios.map(municipio => <option key={municipio} value={municipio}>{municipio}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>Sector</label>
+                <select
+                  disabled={!isEdit}
+                  value={locationEdit.sector}
+                  onChange={event => setLocationEdit(prev => ({ ...prev, sector: event.target.value }))}
+                  className={inputCls}
+                >
+                  <option value="">Seleccione un sector</option>
+                  <option value="N/A">N/A</option>
+                  {locationSectores.filter(sector => sector !== "N/A").map(sector => <option key={sector} value={sector}>{sector}</option>)}
+                </select>
+              </div>
+              <div className="sm:col-span-2 lg:col-span-3">
+                <Field label="Dirección Detallada" value={locationEdit.direccion} onChange={value => setLocationEdit(prev => ({ ...prev, direccion: value }))} type="textarea" />
+              </div>
+              <div>
+                <label className={labelCls}>Delito Principal</label>
+                <select
+                  disabled={!isEdit}
+                  value={locationEdit.delito}
+                  onChange={event => setLocationEdit(prev => ({ ...prev, delito: event.target.value }))}
+                  className={inputCls}
+                >
+                  <option value="">Seleccione un delito</option>
+                  {INFRACCIONES.map(delito => <option key={delito} value={delito}>{delito}</option>)}
+                </select>
+              </div>
               <div className="sm:col-span-2">
-                <Field label="Tipos Penales" value={firstText(caseRecord?.tipos_penales)} />
+                <Field label="Tipos Penales" value={locationEdit.tiposPenales} onChange={value => setLocationEdit(prev => ({ ...prev, tiposPenales: value }))} />
               </div>
             </div>
           )}
@@ -3503,6 +3679,7 @@ function NewCaseView({ setView, currentUser }: { setView: (v: View) => void; cur
   const [measures, setMeasures] = useState({ arresto: false, roja: false, migratoria: false, policia: false });
   const [location, setLocation] = useState({ provincia: "", municipio: "", sector: "", direccion: "", delito: "", tiposPenales: "" });
   const [observation, setObservation] = useState("");
+  const [measureObservation, setMeasureObservation] = useState("");
   const [analystOptions, setAnalystOptions] = useState<string[]>([]);
   const [newCaseFiles, setNewCaseFiles] = useState<File[]>([]);
   const newCaseFileInputId = "ucaprec-new-case-files";
@@ -3547,7 +3724,7 @@ function NewCaseView({ setView, currentUser }: { setView: (v: View) => void; cur
     const generalHasData = Object.values(general).some(v => String(v ?? "").trim() !== "");
     const locationHasData = Object.values(location).some(v => String(v ?? "").trim() !== "");
     const measuresHasData = Object.values(measures).some(Boolean);
-    const observationHasData = observation.trim() !== "";
+    const observationHasData = observation.trim() !== "" || measureObservation.trim() !== "";
     const defsHasData = defs.length > 0;
     const vicsHasData = vics.length > 0;
     return generalHasData || locationHasData || measuresHasData || observationHasData || defsHasData || vicsHasData || newCaseFiles.length > 0;
@@ -3712,7 +3889,7 @@ function NewCaseView({ setView, currentUser }: { setView: (v: View) => void; cur
           delito: location.delito,
           activada_por: currentUser.username,
           activa: true,
-          observacion: observation,
+          observacion: measureObservation,
         }))
       ));
     }
@@ -3818,7 +3995,7 @@ function NewCaseView({ setView, currentUser }: { setView: (v: View) => void; cur
           <div className={tab === 3 ? "" : "hidden"}>
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">{[{ key: "arresto" as const, label: "Orden de Arresto", icon: Lock, color: "text-amber-600" }, { key: "roja" as const, label: "Alerta Roja (Interpol)", icon: AlertOctagon, color: "text-red-600" }, { key: "migratoria" as const, label: "Alerta Migratoria", icon: Globe, color: "text-indigo-600" }, { key: "policia" as const, label: "Subido a Policía Nacional", icon: Shield, color: "text-teal-600" }].map(({ key, label, icon: Icon, color }) => { const active = measures[key]; return <div key={key} className={`flex items-center justify-between p-4 border rounded-lg transition-colors ${active ? "border-emerald-200 bg-emerald-50 dark:border-emerald-900/30 dark:bg-emerald-900/10" : "border-border bg-muted/20"}`}><div className="flex items-center gap-3"><Icon size={18} className={color} /><span className="text-sm font-medium text-foreground">{label}</span></div><button onClick={() => toggleMeasure(key)} className={`px-3 py-1 rounded text-xs font-mono font-medium transition-colors ${active ? "bg-emerald-600 text-white hover:bg-emerald-700" : "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"}`}>{active ? "ACTIVA" : "INACTIVA"}</button></div>; })}</div>
-              <div className="border border-border rounded-lg p-4"><label className={labelCls}>Observaciones de medidas</label><textarea rows={3} className={`${inputCls} resize-none`} placeholder="Escriba observaciones sobre las medidas o alertas..." /></div>
+              <div className="border border-border rounded-lg p-4"><label className={labelCls}>Observaciones de medidas</label><textarea rows={3} value={measureObservation} onChange={e => setMeasureObservation(e.target.value)} className={`${inputCls} resize-none`} placeholder="Escriba observaciones sobre las medidas o alertas..." /></div>
             </div>
           </div>
           <div className={tab === 4 ? "" : "hidden"}><div className="space-y-4"><div className="border border-border rounded-lg p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"><div><label className={labelCls}>Provincia</label><select value={location.provincia} onChange={e => setLocation(prev => ({ ...prev, provincia: e.target.value, municipio: "", sector: "" }))} className={inputCls}><option value="">Seleccione una provincia</option><option value="N/A">N/A</option>{PROVINCIAS.map(p => <option key={p} value={p}>{p}</option>)}</select></div><div><label className={labelCls}>Municipio</label><select value={location.municipio} onChange={e => setLocation(prev => ({ ...prev, municipio: e.target.value, sector: "" }))} className={inputCls}><option value="">Seleccione un municipio</option><option value="N/A">N/A</option>{municipios.map(m => <option key={m} value={m}>{m}</option>)}</select></div><div><label className={labelCls}>Sector</label><select value={location.sector} onChange={e => updateLocation("sector", e.target.value)} className={inputCls}><option value="">Seleccione un sector</option><option value="N/A">N/A</option>{sectores.filter(s => s !== "N/A").map(s => <option key={s} value={s}>{s}</option>)}</select></div><div className="sm:col-span-2 lg:col-span-3"><label className={labelCls}>Dirección Detallada</label><textarea rows={2} value={location.direccion} onChange={e => updateLocation("direccion", e.target.value)} className={`${inputCls} resize-none`} /></div><div><label className={labelCls}>Delito Principal</label><select value={location.delito} onChange={e => updateLocation("delito", e.target.value)} className={inputCls}><option value="">Seleccione un delito</option>{INFRACCIONES.map(inf => <option key={inf} value={inf}>{inf}</option>)}</select></div><div className="sm:col-span-2"><label className={labelCls}>Tipos Penales (texto libre)</label><input value={location.tiposPenales} onChange={e => updateLocation("tiposPenales", e.target.value)} className={inputCls} /></div></div></div></div>
@@ -4707,12 +4884,19 @@ function AuditView() {
 
   const filtered = useMemo(() => auditRows.filter(r => {
     if (filterTipo !== "Todas" && r.tipo !== tipoMap[filterTipo]) return false;
+    if (filterDesde || filterHasta) {
+      const date = new Date(r.fecha);
+      if (!Number.isNaN(date.getTime())) {
+        if (filterDesde && date < new Date(filterDesde)) return false;
+        if (filterHasta && date > new Date(`${filterHasta}T23:59:59`)) return false;
+      }
+    }
     if (search) {
       const q = search.toLowerCase();
       if (!r.usuario.toLowerCase().includes(q) && !r.accion.toLowerCase().includes(q) && !r.entidad.toLowerCase().includes(q) && !r.detalle.toLowerCase().includes(q) && !r.modulo.toLowerCase().includes(q)) return false;
     }
     return true;
-  }), [auditRows, search, filterTipo]);
+  }), [auditRows, search, filterTipo, filterDesde, filterHasta]);
 
   return (
     <div className="p-6">
@@ -5122,7 +5306,7 @@ const victimasData = [
 ];
 
 function VictimsView({ setView, currentUser }: { setView: (v: View) => void; currentUser: SessionUser }) {
-  type VicRow = typeof victimasData[0];
+  type VicRow = typeof victimasData[0] & { dbId?: string };
   const [vics, setVics] = useState<VicRow[]>([]);
   const [search, setSearch] = useState("");
   const [filterTipo, setFilterTipo] = useState("Todos");
@@ -5147,6 +5331,7 @@ function VictimsView({ setView, currentUser }: { setView: (v: View) => void; cur
         }
         setVics((data ?? []).map((row, idx) => ({
           id: firstId(idx + 1, row.id, row.victima_id),
+          dbId: firstText(row.id, row.victima_id),
           nombre: firstText(row.nombre_completo, row.nombre, row.razon_social),
           tipo: firstText(row.tipo_persona, row.tipo, "Persona Física"),
           exp: firstText(row.numero_expediente, row.expediente, row.expediente_id),
@@ -5200,7 +5385,15 @@ function VictimsView({ setView, currentUser }: { setView: (v: View) => void; cur
   };
   const saveEdit = async () => {
     if (!selected) return;
-    const { error } = await supabase
+    const changesDetail = describeFieldChanges([
+      { campo: "Expediente", antes: selected.exp, despues: editForm.exp },
+      { campo: "Tipo", antes: selected.tipo, despues: editForm.tipo },
+      { campo: "Nombre", antes: selected.nombre, despues: editForm.nombre },
+      { campo: "Imputado relacionado", antes: selected.imputado, despues: editForm.imputado },
+      { campo: "Delito", antes: selected.delito, despues: editForm.delito },
+    ]);
+
+    let query = supabase
       .from("victimas")
       .update({
         numero_expediente: editForm.exp,
@@ -5208,12 +5401,21 @@ function VictimsView({ setView, currentUser }: { setView: (v: View) => void; cur
         nombre_completo: editForm.nombre,
         imputado: editForm.imputado,
         delito: editForm.delito,
-      })
-      .eq("numero_expediente", selected.exp)
-      .eq("nombre_completo", selected.nombre);
+      });
+
+    query = selected.dbId
+      ? query.eq("id", selected.dbId)
+      : query.eq("numero_expediente", selected.exp).eq("nombre_completo", selected.nombre);
+
+    const { data: updatedRows, error } = await query.select();
 
     if (error) {
       console.error("Error actualizando víctima:", error);
+      return;
+    }
+
+    if (!updatedRows || updatedRows.length === 0) {
+      console.error("No se actualizó ninguna víctima. Verifique el identificador del registro.");
       return;
     }
 
@@ -5222,7 +5424,7 @@ function VictimsView({ setView, currentUser }: { setView: (v: View) => void; cur
       accion: "EDITAR_VICTIMA",
       modulo: "Víctimas",
       entidad: selected.exp,
-      detalle: `Víctima ${selected.nombre} actualizada.`,
+      detalle: changesDetail,
       tipo: "update",
     });
 
@@ -5232,11 +5434,11 @@ function VictimsView({ setView, currentUser }: { setView: (v: View) => void; cur
 
   const deleteVictim = async () => {
     if (!selected) return;
-    const { error } = await supabase
-      .from("victimas")
-      .delete()
-      .eq("numero_expediente", selected.exp)
-      .eq("nombre_completo", selected.nombre);
+    let query = supabase.from("victimas").delete();
+    query = selected.dbId
+      ? query.eq("id", selected.dbId)
+      : query.eq("numero_expediente", selected.exp).eq("nombre_completo", selected.nombre);
+    const { error } = await query;
 
     if (error) {
       console.error("Error eliminando víctima:", error);
@@ -5961,7 +6163,6 @@ function DocumentsView({ setView, currentUser }: { setView: (v: View) => void; c
   const [uploadCasePickerOpen, setUploadCasePickerOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [filterTipo, setFilterTipo] = useState("Todos");
-  const [filterExp, setFilterExp] = useState("");
   const [search, setSearch] = useState("");
   const [showUpload, setShowUpload] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -6219,13 +6420,12 @@ function DocumentsView({ setView, currentUser }: { setView: (v: View) => void; c
 
   const filtered = useMemo(() => docs.filter(d => {
     if (filterTipo !== "Todos" && d.tipo !== filterTipo) return false;
-    if (filterExp && !d.exp.toLowerCase().includes(filterExp.toLowerCase())) return false;
     if (search) {
       const q = search.toLowerCase();
       if (!d.nombre.toLowerCase().includes(q) && !d.descripcion.toLowerCase().includes(q) && !d.imputado.toLowerCase().includes(q) && !d.exp.toLowerCase().includes(q) && !d.subidoPor.toLowerCase().includes(q)) return false;
     }
     return true;
-  }), [docs, filterTipo, filterExp, search]);
+  }), [docs, filterTipo, search]);
 
   return (
     <div className="p-6">
@@ -6265,10 +6465,6 @@ function DocumentsView({ setView, currentUser }: { setView: (v: View) => void; c
               <ChipFilter key={t} label={t} active={filterTipo === t} onClick={() => setFilterTipo(t)} />
             ))}
           </div>
-          <div className="flex flex-col gap-0.5">
-            <label className="text-[10px] text-muted-foreground uppercase tracking-wider">Expediente</label>
-            <input value={filterExp} onChange={e => setFilterExp(e.target.value)} placeholder="EXP-2024-..." className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[130px]" />
-          </div>
           <div className="ml-auto flex gap-2 items-center">
             <Btn variant="secondary" icon={FileSpreadsheet} size="sm" onClick={() => downloadExcel(
               ["Documento", "Tipo", "Expediente", "Imputado", "Descripción", "Versión", "Subido por", "Fecha", "Tamaño"],
@@ -6281,10 +6477,10 @@ function DocumentsView({ setView, currentUser }: { setView: (v: View) => void; c
             </div>
           </div>
         </div>
-        {(search || filterTipo !== "Todos" || filterExp) && (
+        {(search || filterTipo !== "Todos") && (
           <div className="flex items-center gap-2 mt-2 pt-2 border-t border-border">
             <span className="text-xs text-muted-foreground">{filtered.length} resultado(s)</span>
-            <button onClick={() => { setSearch(""); setFilterTipo("Todos"); setFilterExp(""); }} className="text-xs text-primary hover:underline flex items-center gap-1"><X size={10} /> Limpiar</button>
+            <button onClick={() => { setSearch(""); setFilterTipo("Todos"); }} className="text-xs text-primary hover:underline flex items-center gap-1"><X size={10} /> Limpiar</button>
           </div>
         )}
       </div>
@@ -6528,6 +6724,24 @@ function ReportsView() {
   const [loading, setLoading] = useState(false);
   const [reportRows, setReportRows] = useState<DbRow[]>([]);
   const [error, setError] = useState("");
+  const reportHeaders = useMemo(() => {
+    if (reportRows.length === 0) return [];
+    const rawHeaders = Array.from(new Set(reportRows.flatMap(row => Object.keys(row))));
+    return ["ID UCAPREC", ...rawHeaders.filter(header => !["id", "codigo_estructurado"].includes(header))];
+  }, [reportRows]);
+  const reportCellValue = (row: DbRow, header: string) => {
+    if (header === "ID UCAPREC") {
+      return firstText(
+        row.codigo_estructurado,
+        buildStructuredCaseId(
+          firstText(row.numero_sentencia, row.numero_expediente, "SIN-RESOLUCION"),
+          new Date(firstText(row.created_at, row.fecha_recepcion))
+        )
+      );
+    }
+    const value = row[header];
+    return typeof value === "object" && value !== null ? JSON.stringify(value) : value;
+  };
 
   const loadFullCaseReport = async () => {
     setLoading(true);
@@ -6555,17 +6769,13 @@ function ReportsView() {
 
   const exportFullCaseReport = () => {
     const rows = reportRows;
-    const headers = Array.from(new Set(rows.flatMap(row => Object.keys(row))));
-    if (headers.length === 0) {
+    if (reportHeaders.length === 0) {
       setError("No hay datos para exportar. Genere el reporte primero.");
       return;
     }
     downloadExcel(
-      headers,
-      rows.map(row => headers.map(header => {
-        const value = row[header];
-        return typeof value === "object" && value !== null ? JSON.stringify(value) : value;
-      })),
+      reportHeaders,
+      rows.map(row => reportHeaders.map(header => reportCellValue(row, header))),
       "reporte-expedientes-completo.xls"
     );
   };
@@ -6610,7 +6820,7 @@ function ReportsView() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
-                  {Object.keys(reportRows[0]).map(header => (
+                  {reportHeaders.map(header => (
                     <th key={header} className="text-left py-2.5 px-4 font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">{header}</th>
                   ))}
                 </tr>
@@ -6618,9 +6828,9 @@ function ReportsView() {
               <tbody>
                 {reportRows.slice(0, 25).map((row, index) => (
                   <tr key={index} className="border-b border-border/50 hover:bg-muted/20">
-                    {Object.keys(reportRows[0]).map(header => (
+                    {reportHeaders.map(header => (
                       <td key={header} className="py-2.5 px-4 text-foreground whitespace-nowrap max-w-[220px] truncate">
-                        {typeof row[header] === "object" && row[header] !== null ? JSON.stringify(row[header]) : String(row[header] ?? "")}
+                        {String(reportCellValue(row, header) ?? "")}
                       </td>
                     ))}
                   </tr>
@@ -7089,7 +7299,22 @@ export default function App() {
   const [selectedDefendantCaseId, setSelectedDefendantCaseId] = useState("");
   const [selectedNotificationCaseId, setSelectedNotificationCaseId] = useState("");
   const [reviewCaseCount, setReviewCaseCount] = useState(0);
+  const [permissionConfig, setPermissionConfig] = useState<Record<string, Record<string, boolean>>>({});
   const canAccessAdmin = currentUser ? isAdminRole(currentUser.role) : false;
+  const rolePermissionDefault = useCallback((key: string) => {
+    const role = currentUser?.role ?? "";
+    if (key === "cases.delete") return role === "Administrador";
+    if (key === "cases.create" || key === "cases.edit") return ["Administrador", "Supervisor", "Analista"].includes(role);
+    return role === "Administrador";
+  }, [currentUser?.role]);
+  const canUsePermission = useCallback((key: string) => {
+    if (!currentUser) return false;
+    const custom = permissionConfig[currentUser.username]?.[key];
+    return typeof custom === "boolean" ? custom : rolePermissionDefault(key);
+  }, [currentUser, permissionConfig, rolePermissionDefault]);
+  const canCreateCases = canUsePermission("cases.create");
+  const canEditCases = canUsePermission("cases.edit");
+  const canDeleteCases = canUsePermission("cases.delete");
 
   // ── Navigation history ──
   const [navHist, setNavHist] = useState<View[]>(["dashboard"]);
@@ -7149,6 +7374,28 @@ export default function App() {
   useEffect(() => {
     let active = true;
     supabase
+      .from("configuracion_sistema")
+      .select("valor")
+      .eq("clave", "permisos_usuarios")
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error("Error cargando permisos de sesión:", error);
+          return;
+        }
+        if (data?.valor && typeof data.valor === "object" && !Array.isArray(data.valor)) {
+          setPermissionConfig(data.valor as Record<string, Record<string, boolean>>);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [currentUser?.username]);
+
+  useEffect(() => {
+    let active = true;
+    supabase
       .from("expedientes")
       .select("id", { count: "exact", head: true })
       .eq("estado_registro", "En Revisión")
@@ -7172,6 +7419,25 @@ export default function App() {
     setNavHist(["dashboard"]);
     setHistIdx(0);
   }, []);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const timeoutMs = 30 * 60 * 1000;
+    let timer: ReturnType<typeof window.setTimeout>;
+    const resetTimer = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        void handleLogout();
+      }, timeoutMs);
+    };
+    const events = ["mousemove", "mousedown", "keydown", "scroll", "touchstart"];
+    events.forEach(event => window.addEventListener(event, resetTimer, { passive: true }));
+    resetTimer();
+    return () => {
+      window.clearTimeout(timer);
+      events.forEach(event => window.removeEventListener(event, resetTimer));
+    };
+  }, [currentUser, handleLogout]);
 
   const openAddImputadoFromDefendants = useCallback((caseId: string) => {
     setSelectedCaseId("");
@@ -7211,20 +7477,21 @@ export default function App() {
 
     switch (view) {
       case "dashboard": return <DashboardView setView={navigate} />;
-      case "cases": return <CasesView setView={navigate} openCase={openCaseFromList} currentUser={currentUser} />;
-      case "case-detail": return <CaseDetailView setView={navigate} mode="detail" selectedCaseId={selectedCaseId} currentUser={currentUser} />;
+      case "cases": return <CasesView setView={navigate} openCase={openCaseFromList} currentUser={currentUser} canCreateCases={canCreateCases} canEditCases={canEditCases} canDeleteCases={canDeleteCases} />;
+      case "case-detail": return <CaseDetailView setView={navigate} mode="detail" selectedCaseId={selectedCaseId} currentUser={currentUser} canEditCases={canEditCases} />;
       case "case-form": return (
         <CaseDetailView
           setView={navigate}
           mode="form"
           currentUser={currentUser}
+          canEditCases={canEditCases}
           initialTab={caseFormStartTab}
           autoOpenAddDefModal={autoOpenAddDefModal}
           selectedCaseId={selectedNotificationCaseId || selectedDefendantCaseId || selectedCaseId}
           onConsumedAutoOpenAddDefModal={() => setAutoOpenAddDefModal(false)}
         />
       );
-      case "case-new": return <NewCaseView setView={navigate} currentUser={currentUser} />;
+      case "case-new": return canCreateCases ? <NewCaseView setView={navigate} currentUser={currentUser} /> : <DashboardView setView={navigate} />;
       case "defendants": return <DefendantsView setView={navigate} openAddImputado={openAddImputadoFromDefendants} />;
       case "victims": return <VictimsView setView={navigate} currentUser={currentUser} />;
       case "measures": return <MeasuresView setView={navigate} currentUser={currentUser} />;
@@ -7278,6 +7545,7 @@ export default function App() {
           openCaseFromNotification={openCaseFromNotification}
           openNotificationsCenter={openNotificationsCenter}
           canAccessAdmin={canAccessAdmin}
+          onLogout={handleLogout}
         />
         <main className="flex-1 overflow-y-auto">
           {renderView()}

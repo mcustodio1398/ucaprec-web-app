@@ -90,6 +90,7 @@ create table ucaprec.user_permissions (
 create table ucaprec.expedientes (
   id uniqueidentifier not null constraint df_expedientes_id default newid() primary key,
   numero_expediente nvarchar(100) not null unique,
+  codigo_estructurado nvarchar(180) null unique,
   numero_sentencia nvarchar(150) null,
   tipo_expediente nvarchar(80) null,
   jurisdiccion nvarchar(180) null,
