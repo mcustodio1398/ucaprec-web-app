@@ -273,25 +273,69 @@ function downloadCSV(headers: string[], rows: (string | number)[][], filename: s
 }
 
 function downloadExcel(headers: string[], rows: (string | number | boolean | null | undefined)[][], filename: string) {
-  const escapeHtml = (value: string | number | boolean | null | undefined) =>
-    String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  const table = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
-      <head><meta charset="UTF-8" /></head>
-      <body>
-        <table>
-          <thead><tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead>
-          <tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody>
-        </table>
-      </body>
-    </html>`;
-  const blob = new Blob([table], { type: "application/vnd.ms-excel;charset=utf-8;" });
+  const escapeXml = (value: string | number | boolean | null | undefined) => String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+  const worksheetName = filename.replace(/\.(xlsx?|csv)$/i, "").slice(0, 31) || "Reporte";
+  const colName = (index: number) => {
+    let name = "";
+    let current = index + 1;
+    while (current > 0) {
+      const mod = (current - 1) % 26;
+      name = String.fromCharCode(65 + mod) + name;
+      current = Math.floor((current - mod) / 26);
+    }
+    return name;
+  };
+  const sheetRows = [headers, ...rows].map((row, rowIndex) =>
+    `<row r="${rowIndex + 1}">${headers.map((_, colIndex) => {
+      const value = row[colIndex] ?? "";
+      return `<c r="${colName(colIndex)}${rowIndex + 1}" t="inlineStr"><is><t>${escapeXml(value)}</t></is></c>`;
+    }).join("")}</row>`
+  ).join("");
+  const files: Record<string, string> = {
+    "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`,
+    "_rels/.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
+    "xl/workbook.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${escapeXml(worksheetName)}" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+    "xl/_rels/workbook.xml.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`,
+    "xl/worksheets/sheet1.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetRows}</sheetData></worksheet>`,
+  };
+  const encoder = new TextEncoder();
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc32 = (data: Uint8Array) => {
+    let crc = 0 ^ -1;
+    for (let i = 0; i < data.length; i += 1) crc = (crc >>> 8) ^ crcTable[(crc ^ data[i]) & 0xff];
+    return (crc ^ -1) >>> 0;
+  };
+  const bytes: number[] = [];
+  const central: number[] = [];
+  const push16 = (target: number[], value: number) => { target.push(value & 0xff, (value >>> 8) & 0xff); };
+  const push32 = (target: number[], value: number) => { target.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff); };
+  Object.entries(files).forEach(([path, content]) => {
+    const name = encoder.encode(path);
+    const data = encoder.encode(content);
+    const crc = crc32(data);
+    const offset = bytes.length;
+    push32(bytes, 0x04034b50); push16(bytes, 20); push16(bytes, 0); push16(bytes, 0); push16(bytes, 0); push16(bytes, 0);
+    push32(bytes, crc); push32(bytes, data.length); push32(bytes, data.length); push16(bytes, name.length); push16(bytes, 0);
+    bytes.push(...name, ...data);
+    push32(central, 0x02014b50); push16(central, 20); push16(central, 20); push16(central, 0); push16(central, 0); push16(central, 0); push16(central, 0);
+    push32(central, crc); push32(central, data.length); push32(central, data.length); push16(central, name.length); push16(central, 0); push16(central, 0); push16(central, 0); push16(central, 0); push32(central, 0); push32(central, offset);
+    central.push(...name);
+  });
+  const centralOffset = bytes.length;
+  bytes.push(...central);
+  push32(bytes, 0x06054b50); push16(bytes, 0); push16(bytes, 0); push16(bytes, Object.keys(files).length); push16(bytes, Object.keys(files).length); push32(bytes, central.length); push32(bytes, centralOffset); push16(bytes, 0);
+  const blob = new Blob([new Uint8Array(bytes)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   const url = URL.createObjectURL(blob);
-  const a = Object.assign(document.createElement("a"), { href: url, download: filename.replace(/\.xlsx?$/i, "") + ".xls" });
+  const a = Object.assign(document.createElement("a"), { href: url, download: filename.replace(/\.(xlsx?|csv)$/i, "") + ".xlsx" });
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -638,7 +682,7 @@ function LoginPage({ onLogin }: { onLogin: (user: SessionUser, remember: boolean
         </div>
 
         <div className="p-8 lg:p-10 flex flex-col justify-center">
-          <div className="mb-8">
+          <div className="mb-8 text-center">
             <h2 className="text-2xl font-semibold text-slate-950">Iniciar sesión</h2>
             <p className="text-sm text-slate-500 mt-2">Ingrese con su correo institucional o usuario asignado.</p>
           </div>
@@ -653,7 +697,7 @@ function LoginPage({ onLogin }: { onLogin: (user: SessionUser, remember: boolean
                   onChange={event => setIdentifier(event.target.value)}
                   autoComplete="username"
                   className="w-full pl-10 pr-3 py-2.5 text-sm border border-slate-300 rounded-md outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
-                  placeholder="michael.custodio@pgr.gob.do"
+                  placeholder="Inserte su correo o usuario"
                 />
               </div>
             </div>
@@ -1183,8 +1227,16 @@ const [dashboardEvolution, setDashboardEvolution] = useState<Array<{ mes: string
 const [dashboardStatusPie, setDashboardStatusPie] = useState<Array<{ name: string; value: number; color: string }>>([])
 const [dashboardDistricts, setDashboardDistricts] = useState<Array<{ name: string; casos: number }>>([])
 const [dashboardAlertsByMonth, setDashboardAlertsByMonth] = useState<Array<{ mes: string; roja: number; migratoria: number; arresto: number }>>([])
+const [dashboardSexData, setDashboardSexData] = useState<Array<{ name: string; value: number; color: string }>>([])
+const [dashboardAgeRanges, setDashboardAgeRanges] = useState<Array<{ name: string; casos: number }>>([])
+const [dashboardNationality, setDashboardNationality] = useState<Array<{ name: string; casos: number }>>([])
+const [dashboardTopCrimes, setDashboardTopCrimes] = useState<Array<{ name: string; casos: number }>>([])
+const [dashboardAnalysts, setDashboardAnalysts] = useState<Array<{ name: string; casos: number }>>([])
+const [dashboardRecordStatus, setDashboardRecordStatus] = useState<Array<{ name: string; casos: number }>>([])
+const [dashboardDataQuality, setDashboardDataQuality] = useState<Array<{ name: string; casos: number }>>([])
 const [showFilters, setShowFilters] = useState(false)
 const [dashboardRefresh, setDashboardRefresh] = useState(0)
+const [dashboardLoading, setDashboardLoading] = useState(false)
 const [filters, setFilters] = useState({
   desde: "",
   hasta: "",
@@ -1213,6 +1265,7 @@ const [filters, setFilters] = useState({
     let active = true
 
     const loadDashboard = async () => {
+      setDashboardLoading(true)
       let casesQuery = supabase
       .from("expedientes")
       .select("*")
@@ -1237,6 +1290,7 @@ const [filters, setFilters] = useState({
         setDashboardKpis(null)
         setDashboardCases([])
         setDashboardExportRows([])
+        setDashboardLoading(false)
         return
       }
 
@@ -1244,17 +1298,32 @@ const [filters, setFilters] = useState({
       const filteredCases = filters.alerta === "Todos" ? cases : cases.filter(c => c.alerta === filters.alerta)
       const caseIds = new Set(filteredCases.map(c => c.id))
       const { data: defendantRows } = await supabase.from("imputados").select("*").limit(5000)
+      const { data: documentRows } = await supabase.from("documentos").select("numero_expediente, expediente_id").limit(5000)
       const defendantsForCases = (defendantRows ?? []).map(mapImputadoRow).filter(d => caseIds.has(d.exp))
+      const rawDefendantsForCases = (defendantRows ?? []).filter(row => caseIds.has(firstText(row.numero_expediente, row.expediente, row.expediente_id)))
       const rawFilteredRows = (caseRows ?? []).filter(row => caseIds.has(mapExpedienteRow(row, 0).id))
       const countMap = <T extends string>(items: T[]) => items.reduce<Record<string, number>>((acc, item) => {
         const key = item || "Sin dato"
         acc[key] = (acc[key] ?? 0) + 1
         return acc
       }, {})
+      const topList = (items: string[], limit = 8) => Object.entries(countMap(items))
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, limit)
+        .map(([name, casos]) => ({ name, casos }))
+      const ageRange = (value: number) => {
+        if (!value) return "Sin edad"
+        if (value <= 25) return "18-25"
+        if (value <= 35) return "26-35"
+        if (value <= 45) return "36-45"
+        if (value <= 60) return "46-60"
+        return "60+"
+      }
       const byMonth = countMap(rawFilteredRows.map(row => monthLabel(firstText(row.fecha_recepcion, row.created_at, row.fecha_registro))))
       const byDistrict = countMap(rawFilteredRows.map(row => firstText(row.jurisdiccion, row.localidad_jurisdiccion, row.provincia, "Sin jurisdicción")))
       const statusCounts = countMap(defendantsForCases.map(d => d.estatus || "Sin estatus"))
       const colors: Record<string, string> = { "Prófugo": "#B91C1C", "Rebeldía": "#D97706", "Recluido": "#059669", "Absuelto": "#94A3B8", "Sin estatus": "#64748B" }
+      const sexColors: Record<string, string> = { "Hombre": "#1D4ED8", "Masculino": "#1D4ED8", "Mujer": "#DB2777", "Femenino": "#DB2777", "Persona Jurídica": "#7C3AED", "Sin dato": "#64748B" }
       const alertMonths = Object.entries(byMonth).map(([mes]) => {
         const monthRows = rawFilteredRows.filter(row => monthLabel(firstText(row.fecha_recepcion, row.created_at, row.fecha_registro)) === mes)
         const monthCases = monthRows.map(row => mapExpedienteRow(row, 0))
@@ -1265,6 +1334,14 @@ const [filters, setFilters] = useState({
           arresto: defendantsForCases.filter(d => d.ordenArresto && monthCases.some(c => c.id === d.exp)).length,
         }
       })
+      const documentExpedientes = new Set((documentRows ?? []).map(row => firstText(row.numero_expediente, row.expediente_id)).filter(Boolean))
+      const caseIdsWithDefendants = new Set(defendantsForCases.map(d => d.exp))
+      const qualityRows = [
+        { name: "Sin imputados", casos: filteredCases.filter(c => !caseIdsWithDefendants.has(c.id)).length },
+        { name: "Sin documentos", casos: filteredCases.filter(c => !documentExpedientes.has(c.id)).length },
+        { name: "En revisión", casos: filteredCases.filter(c => c.estReg === "En Revisión").length },
+        { name: "Verificados", casos: filteredCases.filter(c => c.estReg === "Verificado").length },
+      ]
 
       setDashboardKpis({
         expedientes_totales: filteredCases.length,
@@ -1282,7 +1359,15 @@ const [filters, setFilters] = useState({
       setDashboardEvolution(Object.entries(byMonth).map(([mes, casos]) => ({ mes, casos })))
       setDashboardStatusPie(Object.entries(statusCounts).map(([name, value]) => ({ name, value, color: colors[name] ?? "#1D4ED8" })))
       setDashboardDistricts(Object.entries(byDistrict).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, casos]) => ({ name, casos })))
-      setDashboardAlertsByMonth(alertMonths)
+      setDashboardAlertsByMonth(alertMonths.slice(-3))
+      setDashboardSexData(Object.entries(countMap(defendantsForCases.map(d => d.sexo || "Sin dato"))).map(([name, value]) => ({ name, value, color: sexColors[name] ?? "#0F766E" })))
+      setDashboardAgeRanges(["18-25", "26-35", "36-45", "46-60", "60+", "Sin edad"].map(name => ({ name, casos: defendantsForCases.filter(d => ageRange(Number(d.edad)) === name).length })))
+      setDashboardNationality(topList(rawDefendantsForCases.map(row => firstText(row.nacionalidad, row.nac, "Sin nacionalidad")), 6))
+      setDashboardTopCrimes(topList(filteredCases.map(c => c.delito || "Sin delito"), 8))
+      setDashboardAnalysts(topList(filteredCases.map(c => c.asignado || "Sin asignar"), 8))
+      setDashboardRecordStatus(topList(filteredCases.map(c => c.estReg || "Sin estado"), 6))
+      setDashboardDataQuality(qualityRows)
+      setDashboardLoading(false)
     }
 
     loadDashboard()
@@ -1304,22 +1389,205 @@ const dashboardValues = {
   subidosPN: dashboardKpis?.subidos_a_pn ?? 0,
 }
 
+const exportDashboardReport = () => {
+  const escapeHtml = (value: unknown) => String(value ?? "—")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;")
+  const pct = (value: number, total: number) => total > 0 ? `${Math.round((value / total) * 100)}%` : "0%"
+  const activeFilters = Object.entries(filters)
+    .filter(([, value]) => value !== "" && value !== "Todos")
+    .map(([key, value]) => `${key}: ${value}`)
+  const topLabel = (data: Array<{ name: string; casos: number }>) => data[0] ? `${data[0].name} (${data[0].casos})` : "sin datos suficientes"
+  const chartBars = (title: string, data: Array<{ name: string; casos: number }>, color = "#1D4ED8") => {
+    const max = Math.max(1, ...data.map(item => item.casos))
+    return `
+      <section class="block">
+        <h2>${escapeHtml(title)}</h2>
+        <div class="bars">
+          ${data.length === 0 ? `<p class="muted">No hay datos disponibles.</p>` : data.map(item => `
+            <div class="bar-row">
+              <div class="bar-label">${escapeHtml(item.name)}</div>
+              <div class="bar-track"><div class="bar-fill" style="width:${Math.max(4, (item.casos / max) * 100)}%; background:${color};"></div></div>
+              <div class="bar-value">${item.casos.toLocaleString()}</div>
+            </div>
+          `).join("")}
+        </div>
+      </section>`
+  }
+  const pieLegend = (title: string, data: Array<{ name: string; value: number; color: string }>, total: number) => `
+    <section class="block">
+      <h2>${escapeHtml(title)}</h2>
+      <div class="legend">
+        ${data.length === 0 ? `<p class="muted">No hay datos disponibles.</p>` : data.map(item => `
+          <div class="legend-row">
+            <span class="dot" style="background:${item.color};"></span>
+            <span>${escapeHtml(item.name)}</span>
+            <strong>${item.value.toLocaleString()} (${pct(item.value, total)})</strong>
+          </div>
+        `).join("")}
+      </div>
+    </section>`
+  const alertChart = `
+    <section class="block wide">
+      <h2>Alertas por tipo - ultimos 3 meses</h2>
+      <table>
+        <thead><tr><th>Mes</th><th>Alertas rojas</th><th>Alertas migratorias</th><th>Ordenes de arresto</th></tr></thead>
+        <tbody>
+          ${dashboardAlertsByMonth.length === 0 ? `<tr><td colspan="4">No hay datos disponibles.</td></tr>` : dashboardAlertsByMonth.map(row => `
+            <tr><td>${escapeHtml(row.mes)}</td><td>${row.roja}</td><td>${row.migratoria}</td><td>${row.arresto}</td></tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </section>`
+  const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Informe sobre las estadisticas de UCAPREC</title>
+  <style>
+    @page { size: A4; margin: 14mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      color: #0f172a;
+      margin: 0;
+      background: linear-gradient(180deg, #eef2f8 0%, #ffffff 220px);
+    }
+    body::before {
+      content: "UCAPREC";
+      position: fixed;
+      right: 18mm;
+      bottom: 18mm;
+      color: rgba(30, 58, 138, .045);
+      font-size: 68px;
+      font-weight: 800;
+      letter-spacing: .14em;
+      z-index: -1;
+    }
+    header {
+      position: relative;
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      gap: 24px;
+      align-items: center;
+      border-radius: 0 0 18px 18px;
+      padding: 32px 30px 26px;
+      margin: 0 0 20px;
+      background: #293681;
+      box-shadow: 0 16px 40px rgba(15, 23, 42, .18);
+      overflow: visible;
+    }
+    .report-logo { width: 220px; max-height: 118px; object-fit: contain; display: block; }
+    h1 { margin: 0 0 8px; font-size: 25px; color: #ffffff; }
+    h2 { margin: 0 0 10px; font-size: 14px; color: #1e3a8a; text-transform: uppercase; letter-spacing: .04em; }
+    p { font-size: 12px; line-height: 1.55; margin: 0 0 8px; }
+    .muted { color: #64748b; }
+    header .muted { color: rgba(255, 255, 255, .82); }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+    .card { border: 1px solid #dbe3ef; border-radius: 10px; padding: 10px; background: rgba(255, 255, 255, .96); box-shadow: 0 8px 24px rgba(15, 23, 42, .04); }
+    .card span { display: block; color: #64748b; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+    .card strong { display: block; font-size: 22px; margin-top: 4px; }
+    .report-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .block { border: 1px solid #dbe3ef; border-radius: 10px; padding: 12px; break-inside: avoid; margin-bottom: 12px; background: rgba(255, 255, 255, .96); box-shadow: 0 8px 24px rgba(15, 23, 42, .04); }
+    .wide { grid-column: 1 / -1; }
+    .bars { display: grid; gap: 7px; }
+    .bar-row { display: grid; grid-template-columns: 105px 1fr 44px; gap: 8px; align-items: center; font-size: 11px; }
+    .bar-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bar-track { height: 12px; background: #eef2f7; border-radius: 999px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 999px; }
+    .bar-value { text-align: right; font-weight: 700; }
+    .legend { display: grid; gap: 7px; }
+    .legend-row { display: grid; grid-template-columns: 12px 1fr auto; gap: 8px; align-items: center; font-size: 11px; }
+    .dot { width: 10px; height: 10px; border-radius: 999px; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 7px; text-align: left; }
+    th { background: #f8fafc; color: #475569; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+    footer { margin-top: 18px; color: #64748b; font-size: 10px; border-top: 1px solid #e2e8f0; padding-top: 10px; }
+  </style>
+</head>
+<body>
+  <header>
+    <img class="report-logo" src="${mpWhiteLogo}" alt="Ministerio Publico" />
+    <div>
+      <h1>Informe sobre las estadisticas de UCAPREC</h1>
+      <p class="muted">Unidad de Captura de Profugos, Rebeldes y Condenados</p>
+      <p class="muted">Generado el ${escapeHtml(new Date().toLocaleString("es-DO"))}</p>
+      <p class="muted">Filtros aplicados: ${escapeHtml(activeFilters.length ? activeFilters.join(" | ") : "Sin filtros")}</p>
+    </div>
+  </header>
+
+  <section class="block wide">
+    <h2>Analisis ejecutivo</h2>
+    <p>El universo analizado contiene ${dashboardValues.expedientesTotales.toLocaleString()} expediente(s) y ${dashboardValues.imputadosTotales.toLocaleString()} imputado(s). Actualmente se identifican ${dashboardValues.profugosActivos.toLocaleString()} profugo(s), ${dashboardValues.enRebeldia.toLocaleString()} registro(s) en rebeldia y ${dashboardValues.pendientesRevision.toLocaleString()} expediente(s) pendiente(s) de revision.</p>
+    <p>El delito con mayor presencia en la muestra es ${escapeHtml(topLabel(dashboardTopCrimes))}. La jurisdiccion con mayor concentracion es ${escapeHtml(topLabel(dashboardDistricts))}, mientras que el analista con mas expedientes asignados es ${escapeHtml(topLabel(dashboardAnalysts))}.</p>
+    <p>En materia de medidas, el sistema refleja ${dashboardValues.alertasRojas.toLocaleString()} alerta(s) roja(s), ${dashboardValues.alertasMigratorias.toLocaleString()} alerta(s) migratoria(s) y ${dashboardValues.ordenesArresto.toLocaleString()} orden(es) de arresto. Estos indicadores permiten priorizar seguimiento operativo y revision documental.</p>
+  </section>
+
+  <section class="grid">
+    ${[
+      ["Expedientes", dashboardValues.expedientesTotales],
+      ["Imputados", dashboardValues.imputadosTotales],
+      ["Profugos", dashboardValues.profugosActivos],
+      ["En rebeldia", dashboardValues.enRebeldia],
+      ["En revision", dashboardValues.pendientesRevision],
+      ["Alertas rojas", dashboardValues.alertasRojas],
+      ["Alertas migratorias", dashboardValues.alertasMigratorias],
+      ["Ordenes arresto", dashboardValues.ordenesArresto],
+    ].map(([label, value]) => `<div class="card"><span>${escapeHtml(label)}</span><strong>${Number(value).toLocaleString()}</strong></div>`).join("")}
+  </section>
+
+  <section class="report-grid">
+    ${pieLegend("Perfil de los imputados", dashboardSexData, dashboardValues.imputadosTotales)}
+    ${chartBars("Rangos de edad", dashboardAgeRanges, "#0F766E")}
+    ${chartBars("Nacionalidades principales", dashboardNationality, "#7C3AED")}
+    ${chartBars("Delitos principales", dashboardTopCrimes, "#B91C1C")}
+    ${chartBars("Casos por analista", dashboardAnalysts, "#1D4ED8")}
+    ${chartBars("Estado del registro", dashboardRecordStatus, "#D97706")}
+    ${chartBars("Calidad de datos", dashboardDataQuality, "#475569")}
+    ${alertChart}
+  </section>
+
+  <section class="block wide">
+    <h2>Expedientes recientes incluidos</h2>
+    <table>
+      <thead><tr><th>Expediente</th><th>Imputado</th><th>Delito</th><th>Estatus</th><th>Alerta</th><th>Asignado</th></tr></thead>
+      <tbody>
+        ${dashboardCases.length === 0 ? `<tr><td colspan="6">No hay expedientes recientes.</td></tr>` : dashboardCases.map(c => `
+          <tr><td>${escapeHtml(c.id)}</td><td>${escapeHtml(c.imputado)}</td><td>${escapeHtml(c.delito)}</td><td>${escapeHtml(c.estatus)}</td><td>${escapeHtml(c.alerta)}</td><td>${escapeHtml(c.asignado)}</td></tr>
+        `).join("")}
+      </tbody>
+    </table>
+  </section>
+
+  <footer>Ministerio Publico de la Republica Dominicana - Unidad de Captura de Profugos, Rebeldes y Condenados (UCAPREC). Documento generado automaticamente desde el sistema.</footer>
+</body>
+</html>`
+  const reportWindow = window.open("", "_blank", "width=1000,height=800")
+  if (!reportWindow) return
+  reportWindow.document.write(html)
+  reportWindow.document.close()
+  reportWindow.focus()
+  setTimeout(() => reportWindow.print(), 500)
+}
+
   return (
 
     <div className="p-6 space-y-6">
       <SectionHeader
         title="Estadísticas Sobre la Unidad de Captura de Prófugos, Rebeldes y Condenados (UCAPREC)"
-        sub={`Resumen operativo actualizado al ${todayLong()}`}
         action={
           <div className="flex gap-2">
             <Btn variant={showFilters ? "primary" : "secondary"} icon={Filter} size="sm" onClick={() => setShowFilters(value => !value)}>Filtros</Btn>
-            <Btn variant="secondary" icon={RefreshCw} size="sm" onClick={() => { clearDashboardFilters(); setDashboardRefresh(value => value + 1); }}>Actualizar</Btn>
+            <Btn variant="secondary" icon={RefreshCw} size="sm" onClick={() => setDashboardRefresh(value => value + 1)}>{dashboardLoading ? "Actualizando..." : "Actualizar"}</Btn>
             <Btn variant="secondary" icon={FileSpreadsheet} size="sm" onClick={() => downloadExcel(
               ["Expediente", "No. Sentencia", "Imputado", "Delito", "Tipo", "Estatus", "Alerta", "Estado Reg.", "Asignado", "Fecha"],
               dashboardExportRows,
               "dashboard_filtrado.xls"
             )}>Exportar Excel</Btn>
-            <Btn variant="secondary" icon={Printer} size="sm" onClick={triggerPrint}>Exportar PDF</Btn>
+            <Btn variant="secondary" icon={Printer} size="sm" onClick={exportDashboardReport}>Exportar PDF</Btn>
           </div>
         }
       />
@@ -1469,7 +1737,7 @@ const dashboardValues = {
 
         <div className="bg-card border border-border rounded-lg p-5">
           <div className="mb-4">
-            <h3 className="font-semibold text-foreground text-sm">Alertas por Tipo — Últimos 6 Meses</h3>
+            <h3 className="font-semibold text-foreground text-sm">Alertas por Tipo — Últimos 3 Meses</h3>
             <p className="text-xs text-muted-foreground">Evolución de alertas activas</p>
           </div>
           <ResponsiveContainer width="100%" height={200}>
@@ -1487,6 +1755,147 @@ const dashboardValues = {
               </Bar>
               <Bar key="dash-arresto" dataKey="arresto" name="Arresto" stackId="a" fill="#D97706" radius={[3, 3, 0, 0]}>
                 <LabelList dataKey="arresto" position="insideTop" style={{ fontSize: 9, fill: "white", fontWeight: 600 }} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Analytical profile charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="bg-card border border-border rounded-lg p-5">
+          <div className="mb-4">
+            <h3 className="font-semibold text-foreground text-sm">Perfil de los imputados</h3>
+            <p className="text-xs text-muted-foreground">Distribución de imputados registrados</p>
+          </div>
+          <ResponsiveContainer width="100%" height={150}>
+            <PieChart>
+              <Pie data={dashboardSexData} cx="50%" cy="50%" innerRadius={42} outerRadius={64} paddingAngle={3} dataKey="value">
+                {dashboardSexData.map((entry) => <Cell key={`sex-${entry.name}`} fill={entry.color} />)}
+              </Pie>
+              <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }} />
+            </PieChart>
+          </ResponsiveContainer>
+          <div className="space-y-1.5 mt-2">
+            {dashboardSexData.map((item) => (
+              <div key={item.name} className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-sm" style={{ background: item.color }} />
+                  <span className="text-muted-foreground">{item.name}</span>
+                </div>
+                <span className="font-mono font-medium text-foreground">{item.value.toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-card border border-border rounded-lg p-5">
+          <div className="mb-4">
+            <h3 className="font-semibold text-foreground text-sm">Rangos de Edad</h3>
+            <p className="text-xs text-muted-foreground">Concentración por perfil etario</p>
+          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={dashboardAgeRanges} margin={{ top: 0, right: 8, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+              <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }} />
+              <Bar dataKey="casos" fill="#0F766E" radius={[3, 3, 0, 0]}>
+                <LabelList dataKey="casos" position="top" style={{ fontSize: 10, fill: "var(--muted-foreground)", fontFamily: "monospace" }} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className="bg-card border border-border rounded-lg p-5">
+          <div className="mb-4">
+            <h3 className="font-semibold text-foreground text-sm">Nacionalidades Principales</h3>
+            <p className="text-xs text-muted-foreground">Top 6 nacionalidades registradas</p>
+          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={dashboardNationality} layout="vertical" margin={{ left: 12, right: 10, top: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+              <YAxis type="category" dataKey="name" width={92} tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+              <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }} />
+              <Bar dataKey="casos" fill="#7C3AED" radius={[0, 3, 3, 0]} barSize={12}>
+                <LabelList dataKey="casos" position="right" style={{ fontSize: 10, fill: "var(--muted-foreground)", fontFamily: "monospace" }} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="bg-card border border-border rounded-lg p-5">
+          <div className="mb-4">
+            <h3 className="font-semibold text-foreground text-sm">Delitos con Mayor Incidencia</h3>
+            <p className="text-xs text-muted-foreground">Top 8 por volumen de expedientes</p>
+          </div>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={dashboardTopCrimes} layout="vertical" margin={{ left: 20, right: 12, top: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+              <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 10, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+              <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }} />
+              <Bar dataKey="casos" fill="#B91C1C" radius={[0, 3, 3, 0]} barSize={12}>
+                <LabelList dataKey="casos" position="right" style={{ fontSize: 10, fill: "var(--muted-foreground)", fontFamily: "monospace" }} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className="bg-card border border-border rounded-lg p-5">
+          <div className="mb-4">
+            <h3 className="font-semibold text-foreground text-sm">Carga Operativa por Analista</h3>
+            <p className="text-xs text-muted-foreground">Expedientes asignados según filtros</p>
+          </div>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={dashboardAnalysts} layout="vertical" margin={{ left: 20, right: 12, top: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+              <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 10, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+              <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }} />
+              <Bar dataKey="casos" fill="#1D4ED8" radius={[0, 3, 3, 0]} barSize={12}>
+                <LabelList dataKey="casos" position="right" style={{ fontSize: 10, fill: "var(--muted-foreground)", fontFamily: "monospace" }} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="bg-card border border-border rounded-lg p-5">
+          <div className="mb-4">
+            <h3 className="font-semibold text-foreground text-sm">Estado del Registro</h3>
+            <p className="text-xs text-muted-foreground">Calidad del flujo documental</p>
+          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={dashboardRecordStatus} margin={{ top: 0, right: 8, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+              <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }} />
+              <Bar dataKey="casos" fill="#D97706" radius={[3, 3, 0, 0]}>
+                <LabelList dataKey="casos" position="top" style={{ fontSize: 10, fill: "var(--muted-foreground)", fontFamily: "monospace" }} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className="bg-card border border-border rounded-lg p-5">
+          <div className="mb-4">
+            <h3 className="font-semibold text-foreground text-sm">Control de Calidad de Datos</h3>
+            <p className="text-xs text-muted-foreground">Registros que requieren atención operativa</p>
+          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={dashboardDataQuality} margin={{ top: 0, right: 8, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+              <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }} />
+              <Bar dataKey="casos" fill="#475569" radius={[3, 3, 0, 0]}>
+                <LabelList dataKey="casos" position="top" style={{ fontSize: 10, fill: "var(--muted-foreground)", fontFamily: "monospace" }} />
               </Bar>
             </BarChart>
           </ResponsiveContainer>
@@ -2954,6 +3363,8 @@ function NewCaseView({ setView, currentUser }: { setView: (v: View) => void; cur
   const [location, setLocation] = useState({ provincia: "", municipio: "", sector: "", direccion: "", delito: "", tiposPenales: "" });
   const [observation, setObservation] = useState("");
   const [analystOptions, setAnalystOptions] = useState<string[]>([]);
+  const [newCaseFiles, setNewCaseFiles] = useState<File[]>([]);
+  const newCaseFileInputId = "ucaprec-new-case-files";
 
   const municipios = useMemo(() => location.provincia ? getMunicipios(location.provincia) : [], [location.provincia]);
   const sectores = useMemo(() => (location.provincia && location.municipio) ? getSectores(location.provincia, location.municipio) : [], [location.provincia, location.municipio]);
@@ -2998,7 +3409,7 @@ function NewCaseView({ setView, currentUser }: { setView: (v: View) => void; cur
     const observationHasData = observation.trim() !== "";
     const defsHasData = defs.length > 0;
     const vicsHasData = vics.length > 0;
-    return generalHasData || locationHasData || measuresHasData || observationHasData || defsHasData || vicsHasData;
+    return generalHasData || locationHasData || measuresHasData || observationHasData || defsHasData || vicsHasData || newCaseFiles.length > 0;
   };
 
   const handleCancelNewCase = () => {
@@ -3113,6 +3524,34 @@ function NewCaseView({ setView, currentUser }: { setView: (v: View) => void; cur
         imputado_relacionado: defs[0]?.nombre ?? "",
         delito: location.delito,
       })));
+    }
+
+    if (newCaseFiles.length > 0) {
+      for (const file of newCaseFiles) {
+        const ext = file.name.split(".").pop()?.toUpperCase() || "FILE";
+        const storagePath = `${caseNumber}/${Date.now()}-${file.name}`;
+        const { error: storageError } = await supabase.storage.from("documentos").upload(storagePath, file, { upsert: false });
+        if (storageError) {
+          console.error("Error subiendo documento del nuevo expediente:", storageError);
+          continue;
+        }
+        const { error: docError } = await supabase.from("documentos").insert({
+          expediente_id: savedCaseId,
+          numero_expediente: caseNumber,
+          nombre_archivo: file.name,
+          tipo_archivo: ext,
+          peso: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+          imputado: defs[0]?.nombre ?? "",
+          descripcion: "Documento cargado al crear expediente",
+          subido_por: currentUser.username,
+          version: 1,
+          ruta_storage: storagePath,
+        });
+        if (docError) {
+          console.error("Error registrando documento del nuevo expediente:", docError);
+          await supabase.storage.from("documentos").remove([storagePath]);
+        }
+      }
     }
 
     const activeMeasures = [
@@ -3233,7 +3672,7 @@ function NewCaseView({ setView, currentUser }: { setView: (v: View) => void; cur
             </div>
           </div>
           <div className={tab === 4 ? "" : "hidden"}><div className="space-y-4"><div className="border border-border rounded-lg p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"><div><label className={labelCls}>Provincia<span className="text-red-500 ml-0.5">*</span></label><select value={location.provincia} onChange={e => setLocation(prev => ({ ...prev, provincia: e.target.value, municipio: "", sector: "" }))} className={inputCls}><option value="">Seleccione una provincia</option>{PROVINCIAS.map(p => <option key={p} value={p}>{p}</option>)}</select></div><div><label className={labelCls}>Municipio</label><select value={location.municipio} onChange={e => setLocation(prev => ({ ...prev, municipio: e.target.value, sector: "" }))} className={inputCls}><option value="">Seleccione un municipio</option>{municipios.map(m => <option key={m} value={m}>{m}</option>)}</select></div><div><label className={labelCls}>Sector</label><select value={location.sector} onChange={e => updateLocation("sector", e.target.value)} className={inputCls}><option value="">Seleccione un sector</option>{sectores.map(s => <option key={s} value={s}>{s}</option>)}</select></div><div className="sm:col-span-2 lg:col-span-3"><label className={labelCls}>Dirección Detallada</label><textarea rows={2} value={location.direccion} onChange={e => updateLocation("direccion", e.target.value)} className={`${inputCls} resize-none`} /></div><div><label className={labelCls}>Delito Principal<span className="text-red-500 ml-0.5">*</span></label><select value={location.delito} onChange={e => updateLocation("delito", e.target.value)} className={inputCls}><option value="">Seleccione un delito</option>{INFRACCIONES.map(inf => <option key={inf} value={inf}>{inf}</option>)}</select></div><div className="sm:col-span-2"><label className={labelCls}>Tipos Penales (texto libre)</label><input value={location.tiposPenales} onChange={e => updateLocation("tiposPenales", e.target.value)} className={inputCls} /></div></div></div></div>
-          <div className={tab === 5 ? "" : "hidden"}><div className="space-y-4"><div className="border-2 border-dashed border-border rounded-lg p-8 flex flex-col items-center gap-3 hover:border-primary/40 transition-colors"><Upload size={24} className="text-muted-foreground" /><div className="text-center"><p className="text-sm font-medium text-foreground">Arrastre documentos aquí o haga clic para seleccionar</p><p className="text-xs text-muted-foreground mt-1">PDF, DOCX, XLSX, JPG, PNG — Máx. 20MB por archivo</p></div><Btn variant="secondary" size="sm">Seleccionar archivos</Btn></div><div className="flex flex-col items-center gap-3 py-10 text-muted-foreground border border-border rounded-lg"><FileText size={28} className="opacity-30" /><p className="text-sm">Todavía no hay documentos asociados a este expediente.</p></div></div></div>
+          <div className={tab === 5 ? "" : "hidden"}><div className="space-y-4"><div className="border-2 border-dashed border-border rounded-lg p-8 flex flex-col items-center gap-3 hover:border-primary/40 transition-colors"><input id={newCaseFileInputId} type="file" multiple className="hidden" onChange={e => setNewCaseFiles(Array.from(e.target.files ?? []))} /><Upload size={24} className="text-muted-foreground" /><div className="text-center"><p className="text-sm font-medium text-foreground">Arrastre documentos aquí o haga clic para seleccionar</p><p className="text-xs text-muted-foreground mt-1">PDF, DOCX, XLSX, JPG, PNG — Máx. 20MB por archivo</p></div><Btn variant="secondary" size="sm" onClick={() => document.getElementById(newCaseFileInputId)?.click()}>Seleccionar archivos</Btn></div>{newCaseFiles.length === 0 ? <div className="flex flex-col items-center gap-3 py-10 text-muted-foreground border border-border rounded-lg"><FileText size={28} className="opacity-30" /><p className="text-sm">Todavía no hay documentos asociados a este expediente.</p></div> : <div className="border border-border rounded-lg overflow-hidden">{newCaseFiles.map(file => <div key={`${file.name}-${file.size}`} className="flex items-center gap-3 px-4 py-3 border-b border-border last:border-0"><FileText size={16} className="text-muted-foreground" /><div className="min-w-0 flex-1"><p className="text-sm font-medium text-foreground truncate">{file.name}</p><p className="text-xs text-muted-foreground">{(file.size / 1024 / 1024).toFixed(2)} MB</p></div><button className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-600" onClick={() => setNewCaseFiles(prev => prev.filter(item => item !== file))}><Trash2 size={14} /></button></div>)}</div>}</div></div>
           <div className={tab === 6 ? "" : "hidden"}><div className="space-y-4"><div><label className={labelCls}>Observación general del caso</label><textarea value={observation} onChange={e => setObservation(e.target.value)} rows={5} className={`${inputCls} resize-none`} placeholder="Escriba una observación general del expediente..." /></div><div className="border border-border rounded-lg overflow-hidden"><div className="bg-muted/30 px-4 py-2.5 border-b border-border"><p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Historial de Cambios</p></div><div className="px-4 py-10 text-center text-sm text-muted-foreground">Aún no hay historial para este nuevo expediente.</div></div></div></div>
         </div>
       </div>
@@ -3439,6 +3878,25 @@ function UsersView() {
     "Analista": "bg-sky-100 text-sky-800 dark:bg-sky-900/25 dark:text-sky-400",
     "Consultor": "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400",
   };
+  const permissionRows = [
+    { key: "dashboard.view", label: "Dashboard — Ver", defaults: { Administrador: true, Supervisor: true, Analista: true, Consultor: true } },
+    { key: "cases.create", label: "Expedientes — Crear", defaults: { Administrador: true, Supervisor: true, Analista: true, Consultor: false } },
+    { key: "cases.edit", label: "Expedientes — Editar", defaults: { Administrador: true, Supervisor: true, Analista: true, Consultor: false } },
+    { key: "cases.delete", label: "Expedientes — Eliminar", defaults: { Administrador: true, Supervisor: false, Analista: false, Consultor: false } },
+    { key: "cases.export", label: "Expedientes — Exportar", defaults: { Administrador: true, Supervisor: true, Analista: true, Consultor: true } },
+    { key: "cases.verify", label: "Expedientes — Verificar", defaults: { Administrador: true, Supervisor: true, Analista: false, Consultor: false } },
+    { key: "defendants.measures", label: "Imputados — Gestionar medidas", defaults: { Administrador: true, Supervisor: true, Analista: true, Consultor: false } },
+    { key: "documents.upload", label: "Documentos — Subir", defaults: { Administrador: true, Supervisor: true, Analista: true, Consultor: false } },
+    { key: "documents.download", label: "Documentos — Descargar", defaults: { Administrador: true, Supervisor: true, Analista: true, Consultor: true } },
+    { key: "reports.export", label: "Reportes — Exportar PDF/Excel", defaults: { Administrador: true, Supervisor: true, Analista: true, Consultor: false } },
+    { key: "users.manage", label: "Usuarios — Gestionar", defaults: { Administrador: true, Supervisor: false, Analista: false, Consultor: false } },
+    { key: "catalogs.manage", label: "Catálogos — Administrar", defaults: { Administrador: true, Supervisor: false, Analista: false, Consultor: false } },
+    { key: "audit.view", label: "Auditoría — Ver", defaults: { Administrador: true, Supervisor: true, Analista: false, Consultor: false } },
+    { key: "settings.access", label: "Configuración — Acceder", defaults: { Administrador: true, Supervisor: false, Analista: false, Consultor: false } },
+  ] as const;
+  type RoleName = "Administrador" | "Supervisor" | "Analista" | "Consultor";
+  type PermissionKey = typeof permissionRows[number]["key"];
+  type UserPermissionMap = Record<string, Partial<Record<PermissionKey, boolean>>>;
 
   type UserEntry = typeof usersData[0];
   const adminUserEntry: UserEntry = {
@@ -3457,6 +3915,12 @@ function UsersView() {
   const [selected, setSelected] = useState<UserEntry | null>(null);
   const [editForm, setEditForm] = useState<Partial<UserEntry>>({});
   const [newPwd, setNewPwd] = useState({ pwd: "", confirm: "" });
+  const [resetSaving, setResetSaving] = useState(false);
+  const [resetError, setResetError] = useState("");
+  const [selectedPermissionUser, setSelectedPermissionUser] = useState("");
+  const [userPermissions, setUserPermissions] = useState<UserPermissionMap>({});
+  const [permissionsSaving, setPermissionsSaving] = useState(false);
+  const [permissionsMessage, setPermissionsMessage] = useState("");
   const [dialog, setDialog] = useState<null | {
     title: string;
     message: string;
@@ -3483,6 +3947,31 @@ function UsersView() {
         }
         const mappedUsers = (data ?? []).map(mapUsuarioRow);
         setUsers(mappedUsers.length > 0 ? mappedUsers : [adminUserEntry]);
+        setSelectedPermissionUser((mappedUsers[0] ?? adminUserEntry).usuario);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    supabase
+      .from("configuracion_sistema")
+      .select("valor")
+      .eq("clave", "permisos_usuarios")
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error("Error cargando permisos personalizados:", error);
+          return;
+        }
+        if (data?.valor && typeof data.valor === "object" && !Array.isArray(data.valor)) {
+          setUserPermissions(data.valor as UserPermissionMap);
+        }
       });
 
     return () => {
@@ -3500,6 +3989,7 @@ function UsersView() {
     setSelected(u || null);
     setEditForm(u ? { ...u } : {});
     setNewPwd({ pwd: "", confirm: "" });
+    setResetError("");
     setModal(m);
   };
 
@@ -3534,6 +4024,61 @@ function UsersView() {
     setModal(null);
   };
 
+  const resetUserPassword = async () => {
+    if (!selected) return;
+    setResetError("");
+
+    if (newPwd.pwd.length < 8) {
+      setResetError("La contraseña debe tener mínimo 8 caracteres.");
+      return;
+    }
+
+    if (newPwd.pwd !== newPwd.confirm) {
+      setResetError("Las contraseñas no coinciden.");
+      return;
+    }
+
+    setResetSaving(true);
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+
+    if (!token) {
+      setResetSaving(false);
+      setResetError("No se pudo validar la sesión actual. Cierre sesión e ingrese nuevamente.");
+      return;
+    }
+
+    try {
+      const response = await fetch("/.netlify/functions/reset-user-password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ email: selected.email, password: newPwd.pwd }),
+      });
+      const result = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(result.error || "No fue posible restablecer la contraseña.");
+      }
+
+      setResetSaving(false);
+      setModal(null);
+      setNewPwd({ pwd: "", confirm: "" });
+      setDialog({
+        title: "Contraseña restablecida",
+        message: `La contraseña de ${selected.usuario} fue actualizada exitosamente.`,
+        variant: "info",
+        confirmLabel: "Aceptar",
+        onConfirm: () => setDialog(null),
+      });
+    } catch (error) {
+      setResetSaving(false);
+      setResetError(error instanceof Error ? error.message : "No fue posible restablecer la contraseña.");
+    }
+  };
+
   const toggleStatus = (u: UserEntry) => {
     setUsers(prev => prev.map(p => p.id === u.id ? { ...p, estatus: p.estatus === "Activo" ? "Inactivo" : "Activo" } : p));
   };
@@ -3541,6 +4086,60 @@ function UsersView() {
   const deleteUser = () => {
     if (selected) setUsers(prev => prev.filter(u => u.id !== selected.id));
     setModal(null);
+  };
+
+  const selectedPermissionEntry = users.find(u => u.usuario === selectedPermissionUser) ?? users[0] ?? adminUserEntry;
+  const getRolePermission = (role: string, key: PermissionKey) => {
+    const row = permissionRows.find(item => item.key === key);
+    return Boolean(row?.defaults[role as RoleName]);
+  };
+  const getUserPermission = (user: UserEntry, key: PermissionKey) => {
+    const customValue = userPermissions[user.usuario]?.[key];
+    return typeof customValue === "boolean" ? customValue : getRolePermission(user.rol, key);
+  };
+  const savePermissions = async (nextPermissions: UserPermissionMap) => {
+    setPermissionsSaving(true);
+    setPermissionsMessage("");
+    const { error } = await supabase
+      .from("configuracion_sistema")
+      .upsert({
+        clave: "permisos_usuarios",
+        valor: nextPermissions,
+        updated_at: new Date().toISOString(),
+      });
+
+    setPermissionsSaving(false);
+    if (error) {
+      console.error("Error guardando permisos:", error);
+      setPermissionsMessage("No se pudieron guardar los permisos. Revise las políticas de Supabase para configuración.");
+      return false;
+    }
+
+    setPermissionsMessage("Permisos actualizados correctamente.");
+    return true;
+  };
+  const toggleUserPermission = async (key: PermissionKey) => {
+    if (!selectedPermissionEntry) return;
+    const current = getUserPermission(selectedPermissionEntry, key);
+    const nextPermissions: UserPermissionMap = {
+      ...userPermissions,
+      [selectedPermissionEntry.usuario]: {
+        ...(userPermissions[selectedPermissionEntry.usuario] ?? {}),
+        [key]: !current,
+      },
+    };
+
+    setUserPermissions(nextPermissions);
+    const saved = await savePermissions(nextPermissions);
+    if (!saved) setUserPermissions(userPermissions);
+  };
+  const resetUserPermissionOverrides = async () => {
+    if (!selectedPermissionEntry) return;
+    const nextPermissions = { ...userPermissions };
+    delete nextPermissions[selectedPermissionEntry.usuario];
+    setUserPermissions(nextPermissions);
+    const saved = await savePermissions(nextPermissions);
+    if (!saved) setUserPermissions(userPermissions);
   };
 
   const inp = "w-full px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground";
@@ -3633,9 +4232,31 @@ function UsersView() {
 
       {/* Permissions matrix */}
       <div className="mt-6 bg-card border border-border rounded-lg overflow-hidden">
-        <div className="px-5 py-4 border-b border-border">
-          <h3 className="font-semibold text-foreground text-sm">Matriz de Roles y Permisos</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">Control de acceso por módulo y acción</p>
+        <div className="px-5 py-4 border-b border-border flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+          <div>
+            <h3 className="font-semibold text-foreground text-sm">Matriz de Roles y Permisos</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Control de acceso por módulo, rol y usuario seleccionado</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={selectedPermissionEntry.usuario}
+              onChange={event => {
+                setSelectedPermissionUser(event.target.value);
+                setPermissionsMessage("");
+              }}
+              className="px-3 py-2 text-xs bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground min-w-[220px]"
+            >
+              {users.map(user => <option key={user.usuario} value={user.usuario}>{user.nombre} — {user.rol}</option>)}
+            </select>
+            <Btn variant="secondary" size="sm" icon={RefreshCw} onClick={resetUserPermissionOverrides}>
+              Restablecer por rol
+            </Btn>
+          </div>
+          {permissionsMessage && (
+            <div className={`lg:col-span-2 text-xs rounded-md px-3 py-2 ${permissionsMessage.includes("correctamente") ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-red-50 text-red-700 border border-red-200"}`}>
+              {permissionsMessage}
+            </div>
+          )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -3645,32 +4266,38 @@ function UsersView() {
                 {["Administrador", "Supervisor", "Analista", "Consultor"].map(r => (
                   <th key={r} className="text-center py-3 px-4 font-semibold text-muted-foreground uppercase tracking-wider text-[10px]">{r}</th>
                 ))}
+                <th className="text-center py-3 px-4 font-semibold text-muted-foreground uppercase tracking-wider text-[10px] min-w-[180px]">
+                  {selectedPermissionEntry.usuario}
+                </th>
               </tr>
             </thead>
             <tbody>
-              {([
-                ["Dashboard — Ver", true, true, true, true],
-                ["Expedientes — Crear", true, true, true, false],
-                ["Expedientes — Editar", true, true, true, false],
-                ["Expedientes — Eliminar", true, false, false, false],
-                ["Expedientes — Exportar", true, true, true, true],
-                ["Expedientes — Verificar", true, true, false, false],
-                ["Imputados — Gestionar medidas", true, true, true, false],
-                ["Documentos — Subir", true, true, true, false],
-                ["Documentos — Descargar", true, true, true, true],
-                ["Reportes — Exportar PDF/Excel", true, true, true, false],
-                ["Usuarios — Gestionar", true, false, false, false],
-                ["Catálogos — Administrar", true, false, false, false],
-                ["Auditoría — Ver", true, true, false, false],
-                ["Configuración — Acceder", true, false, false, false],
-              ] as [string, boolean, boolean, boolean, boolean][]).map(([label, a, s, an, c], i) => (
-                <tr key={i} className="border-b border-border/50 hover:bg-muted/20">
-                  <td className="py-2.5 px-4 text-foreground">{label}</td>
-                  {[a, s, an, c].map((v, j) => (
-                    <td key={j} className="py-2.5 px-4 text-center">
-                      {v ? <CheckCircle size={14} className="text-emerald-600 mx-auto" /> : <X size={14} className="text-red-400 mx-auto" />}
+              {permissionRows.map((permission) => (
+                <tr key={permission.key} className="border-b border-border/50 hover:bg-muted/20">
+                  <td className="py-2.5 px-4 text-foreground">{permission.label}</td>
+                  {(["Administrador", "Supervisor", "Analista", "Consultor"] as RoleName[]).map((role) => {
+                    const value = permission.defaults[role];
+                    return (
+                    <td key={role} className="py-2.5 px-4 text-center">
+                      {value ? <CheckCircle size={14} className="text-emerald-600 mx-auto" /> : <X size={14} className="text-red-400 mx-auto" />}
                     </td>
-                  ))}
+                    );
+                  })}
+                  <td className="py-2.5 px-4 text-center">
+                    <button
+                      type="button"
+                      disabled={permissionsSaving}
+                      onClick={() => toggleUserPermission(permission.key)}
+                      className={`inline-flex items-center justify-center gap-1.5 min-w-[118px] px-3 py-1.5 rounded-md border text-[11px] font-medium transition-colors disabled:opacity-60 ${
+                        getUserPermission(selectedPermissionEntry, permission.key)
+                          ? "bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100"
+                          : "bg-red-50 border-red-200 text-red-700 hover:bg-red-100"
+                      }`}
+                    >
+                      {getUserPermission(selectedPermissionEntry, permission.key) ? <CheckCircle size={12} /> : <X size={12} />}
+                      {getUserPermission(selectedPermissionEntry, permission.key) ? "Permitido" : "Bloqueado"}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -3773,10 +4400,15 @@ function UsersView() {
               {newPwd.pwd && newPwd.confirm && newPwd.pwd !== newPwd.confirm && (
                 <p className="text-xs text-red-600">Las contraseñas no coinciden.</p>
               )}
+              {resetError && (
+                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {resetError}
+                </div>
+              )}
             </div>
             <div className="flex gap-2 justify-end px-6 pb-5">
               <Btn variant="secondary" onClick={handleCancelResetModal}>Cancelar</Btn>
-              <Btn icon={Lock} onClick={() => setModal(null)} variant="primary">Restablecer Contraseña</Btn>
+              <Btn icon={Lock} onClick={resetUserPassword} variant="primary">{resetSaving ? "Guardando..." : "Restablecer Contraseña"}</Btn>
             </div>
           </div>
         </div>
@@ -4559,7 +5191,7 @@ const measuresData = [
   { id: 12, tipo: "Alerta Migratoria", imputado: "Constructora REYMA S.R.L.", exp: "EXP-2024-1841", delito: "Malversación", activadaPor: "msantos", fecha: "22/11/2024", activa: false, obs: "Desactivada por error en expediente" },
 ];
 
-function MeasuresView({ setView }: { setView: (v: View) => void }) {
+function MeasuresView({ setView, currentUser }: { setView: (v: View) => void; currentUser: SessionUser }) {
   type MeasureEntry = typeof measuresData[0];
   const EMPTY_MEASURE: Omit<MeasureEntry, "id"> = {
     tipo: "Alerta Roja",
@@ -4682,7 +5314,7 @@ function MeasuresView({ setView }: { setView: (v: View) => void }) {
     const currentDate = new Date().toLocaleDateString("es-DO");
     const nextForm = {
       ...EMPTY_MEASURE,
-      activadaPor: "arodriguez",
+      activadaPor: currentUser.username,
       fecha: currentDate,
     };
     setMeasureForm(nextForm);
@@ -5022,7 +5654,7 @@ function MeasuresView({ setView }: { setView: (v: View) => void }) {
                 </div>
                 <div>
                   <label className={labelCls}>Activada por<span className="text-red-500">*</span></label>
-                  <input value={measureForm.activadaPor} onChange={e => setMeasureForm(p => ({ ...p, activadaPor: e.target.value }))} className={inputCls} placeholder="Usuario responsable" />
+                  <input value={measureForm.activadaPor} readOnly className={`${inputCls} opacity-75 cursor-default`} placeholder="Usuario responsable" />
                 </div>
               </div>
               <div>
@@ -5080,6 +5712,7 @@ function DocumentsView({ setView, currentUser }: { setView: (v: View) => void; c
   const [showUpload, setShowUpload] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<{ url: string; name: string; type: string } | null>(null);
   const [dialog, setDialog] = useState<null | {
     title: string;
     message: string;
@@ -5179,18 +5812,26 @@ function DocumentsView({ setView, currentUser }: { setView: (v: View) => void; c
 
   const previewDocument = async (doc: DocRow) => {
     const url = await getDocumentUrl(doc);
-    if (url) window.open(url, "_blank", "noopener,noreferrer");
+    if (url) setPreviewDoc({ url, name: doc.nombre, type: doc.tipo });
   };
 
   const downloadDocument = async (doc: DocRow) => {
     const url = await getDocumentUrl(doc);
     if (!url) return;
+    const response = await fetch(url);
+    if (!response.ok) {
+      showDocumentMessage("No se pudo descargar", "El archivo no pudo descargarse desde Storage.", "danger");
+      return;
+    }
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.href = url;
+    link.href = blobUrl;
     link.download = doc.nombre;
     document.body.appendChild(link);
     link.click();
     link.remove();
+    URL.revokeObjectURL(blobUrl);
   };
 
   const handleUploadDocument = async () => {
@@ -5553,6 +6194,42 @@ function DocumentsView({ setView, currentUser }: { setView: (v: View) => void; c
               <Btn variant="secondary" onClick={() => setDeleteId(null)}>Cancelar</Btn>
               <Btn variant="danger" icon={Trash2} onClick={deleteDocument}>Eliminar</Btn>
             </div>
+          </div>
+        </div>
+      )}
+
+      {previewDoc && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[65] flex items-center justify-center p-4">
+          <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-5xl h-[86vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+              <div className="min-w-0">
+                <h3 className="font-semibold text-foreground text-sm truncate">{previewDoc.name}</h3>
+                <p className="text-xs text-muted-foreground">Vista previa del documento</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Btn variant="secondary" size="sm" icon={Download} onClick={async () => {
+                  const response = await fetch(previewDoc.url);
+                  if (!response.ok) return;
+                  const blobUrl = URL.createObjectURL(await response.blob());
+                  const link = document.createElement("a");
+                  link.href = blobUrl;
+                  link.download = previewDoc.name;
+                  document.body.appendChild(link);
+                  link.click();
+                  link.remove();
+                  URL.revokeObjectURL(blobUrl);
+                }}>Descargar</Btn>
+                <button onClick={() => setPreviewDoc(null)} className="p-2 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground"><X size={16} /></button>
+              </div>
+            </div>
+            {previewDoc.type === "PDF" ? (
+              <iframe title={previewDoc.name} src={previewDoc.url} className="w-full flex-1 bg-white" />
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
+                <FileText size={36} className="text-muted-foreground opacity-40" />
+                <p className="text-sm text-muted-foreground">La vista previa interna está disponible para PDF. Descargue el archivo para visualizar este formato.</p>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -6278,7 +6955,7 @@ export default function App() {
       case "case-new": return <NewCaseView setView={navigate} currentUser={currentUser} />;
       case "defendants": return <DefendantsView setView={navigate} openAddImputado={openAddImputadoFromDefendants} />;
       case "victims": return <VictimsView setView={navigate} />;
-      case "measures": return <MeasuresView setView={navigate} />;
+      case "measures": return <MeasuresView setView={navigate} currentUser={currentUser} />;
       case "documents": return <DocumentsView setView={navigate} currentUser={currentUser} />;
       case "notifications": return <NotificationsView openCaseFromNotification={openCaseFromNotification} />;
       case "reports": return <ReportsView />;
