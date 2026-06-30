@@ -1,8 +1,8 @@
 // ─── Catálogos UCAPREC ────────────────────────────────────────────────────────
 // Generados desde los archivos CSV oficiales del sistema
 
-// Sectores genéricos compartidos por todos los municipios
-const S = ["Centro", "Los Jardines", "Villa Progreso", "Las Flores", "El Millón", "San Carlos", "Villa María"];
+// Sectores base compartidos por todos los municipios hasta cargar el catálogo oficial completo.
+const S = ["N/A", "Centro", "Los Jardines", "Villa Progreso", "Las Flores", "El Millón", "San Carlos", "Villa María", "Zona Urbana", "Zona Rural", "Ensanche", "Barrio Nuevo", "Los Prados", "La Esperanza"];
 
 // ─── Geografía: Provincia → Municipio → Sectores ────────────────────────────
 
@@ -355,7 +355,7 @@ export const QUIEN_INTERPONE = ["Imputado", "Víctima"];
 
 export const ESTADOS_REGISTRO = ["Verificado", "En Revisión"];
 
-export const ESTADOS_IMPUTADO = ["Recluido", "Prófugo", "Rebeldía", "Absuelto"];
+export const ESTADOS_IMPUTADO = ["Recluido", "Prófugo", "Rebeldía", "Libertad"];
 
 export const ESTADOS_JUDICIALES = ["Condenado", "Absuelto"];
 

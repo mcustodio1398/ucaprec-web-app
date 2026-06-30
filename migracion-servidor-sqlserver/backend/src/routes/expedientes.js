@@ -131,6 +131,77 @@ expedientesRouter.post("/", async (req, res, next) => {
   }
 });
 
+expedientesRouter.put("/:numero", async (req, res, next) => {
+  try {
+    const expediente = req.body.expediente || req.body;
+    const nextNumero = expediente.numero_expediente || req.params.numero;
+
+    const result = await runQuery(
+      `update ucaprec.expedientes
+       set numero_expediente = @nextNumero,
+           numero_sentencia = @numero_sentencia,
+           tipo_expediente = @tipo_expediente,
+           jurisdiccion = @jurisdiccion,
+           localidad_jurisdiccion = @localidad_jurisdiccion,
+           fecha_recepcion = @fecha_recepcion,
+           fecha_decision = @fecha_decision,
+           decision = @decision,
+           quien_interpone = @quien_interpone,
+           estado_registro = coalesce(@estado_registro, estado_registro),
+           asignado_a = @asignado_a,
+           provincia = @provincia,
+           municipio = @municipio,
+           sector = @sector,
+           direccion = @direccion,
+           delito_principal = @delito_principal,
+           tipos_penales = @tipos_penales,
+           observacion = @observacion,
+           updated_at = sysutcdatetime()
+       output inserted.*
+       where numero_expediente = @numero`,
+      {
+        numero: req.params.numero,
+        nextNumero,
+        numero_sentencia: expediente.numero_sentencia ?? null,
+        tipo_expediente: expediente.tipo_expediente ?? null,
+        jurisdiccion: expediente.jurisdiccion ?? null,
+        localidad_jurisdiccion: expediente.localidad_jurisdiccion ?? null,
+        fecha_recepcion: expediente.fecha_recepcion || null,
+        fecha_decision: expediente.fecha_decision || null,
+        decision: expediente.decision ?? null,
+        quien_interpone: expediente.quien_interpone ?? null,
+        estado_registro: expediente.estado_registro ?? null,
+        asignado_a: expediente.asignado_a ?? null,
+        provincia: expediente.provincia ?? null,
+        municipio: expediente.municipio ?? null,
+        sector: expediente.sector ?? null,
+        direccion: expediente.direccion ?? null,
+        delito_principal: expediente.delito_principal ?? null,
+        tipos_penales: expediente.tipos_penales ?? null,
+        observacion: expediente.observacion ?? null,
+      }
+    );
+
+    const saved = result.recordset[0];
+    if (!saved) return res.status(404).json({ error: "Expediente no encontrado." });
+
+    await runQuery(
+      `insert into ucaprec.auditoria (usuario, accion, modulo, entidad, detalle, tipo, ip)
+       values (@usuario, 'EDITAR_EXPEDIENTE', 'Expedientes', @entidad, @detalle, 'update', @ip)`,
+      {
+        usuario: req.user.usuario,
+        entidad: saved.numero_expediente,
+        detalle: `Expediente actualizado. Estado del registro: ${saved.estado_registro}`,
+        ip: req.ip,
+      }
+    );
+
+    res.json(saved);
+  } catch (error) {
+    next(error);
+  }
+});
+
 expedientesRouter.delete("/:numero", async (req, res, next) => {
   try {
     const result = await runQuery(`delete from ucaprec.expedientes where numero_expediente = @numero`, { numero: req.params.numero });

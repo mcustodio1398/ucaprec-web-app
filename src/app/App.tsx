@@ -91,6 +91,7 @@ const statusColors: Record<string, string> = {
   "Prófugo": "bg-red-100 text-red-800 dark:bg-red-900/25 dark:text-red-400",
   "Rebeldía": "bg-amber-100 text-amber-800 dark:bg-amber-900/25 dark:text-amber-400",
   "Recluido": "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/25 dark:text-emerald-400",
+  "Libertad": "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
   "Absuelto": "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
   "Verificado": "bg-blue-100 text-blue-800 dark:bg-blue-900/25 dark:text-blue-400",
   "En Revisión": "bg-orange-100 text-orange-800 dark:bg-orange-900/25 dark:text-orange-400",
@@ -192,6 +193,17 @@ const formatDateTime = (...values: any[]) => {
   if (!raw) return "";
   const date = new Date(raw);
   return Number.isNaN(date.getTime()) ? raw : date.toLocaleString("es-DO");
+};
+
+const toDateInputValue = (...values: any[]) => {
+  const raw = firstText(...values);
+  if (!raw) return "";
+  const date = new Date(raw);
+  if (!Number.isNaN(date.getTime())) return date.toISOString().slice(0, 10);
+  const match = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!match) return "";
+  const [, day, month, year] = match;
+  return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
 };
 
 const todayLong = () => new Date().toLocaleDateString("es-DO", {
@@ -343,6 +355,27 @@ function downloadExcel(headers: string[], rows: (string | number | boolean | nul
 }
 
 function triggerPrint() { window.print(); }
+
+async function logAuditEvent(event: {
+  usuario: string;
+  accion: string;
+  modulo: string;
+  entidad?: string;
+  detalle?: string;
+  tipo?: "create" | "update" | "export" | "security" | "info";
+}) {
+  const { error } = await supabase.from("auditoria").insert({
+    usuario: event.usuario,
+    accion: event.accion,
+    modulo: event.modulo,
+    entidad: event.entidad ?? "",
+    detalle: event.detalle ?? "",
+    tipo: event.tipo ?? "info",
+    ip: "N/D",
+  });
+  if (error) console.error("Error registrando auditoría:", error);
+}
+
 function hasUnsavedDefData(def: Omit<DefEntry, "id">) {
   return Object.entries(def).some(([key, value]) => {
     if (["subidoPN", "arresto", "alertaRoja", "alertaMig"].includes(key)) return Boolean(value);
@@ -1322,7 +1355,7 @@ const [filters, setFilters] = useState({
       const byMonth = countMap(rawFilteredRows.map(row => monthLabel(firstText(row.fecha_recepcion, row.created_at, row.fecha_registro))))
       const byDistrict = countMap(rawFilteredRows.map(row => firstText(row.jurisdiccion, row.localidad_jurisdiccion, row.provincia, "Sin jurisdicción")))
       const statusCounts = countMap(defendantsForCases.map(d => d.estatus || "Sin estatus"))
-      const colors: Record<string, string> = { "Prófugo": "#B91C1C", "Rebeldía": "#D97706", "Recluido": "#059669", "Absuelto": "#94A3B8", "Sin estatus": "#64748B" }
+      const colors: Record<string, string> = { "Prófugo": "#B91C1C", "Rebeldía": "#D97706", "Recluido": "#059669", "Libertad": "#94A3B8", "Absuelto": "#94A3B8", "Sin estatus": "#64748B" }
       const sexColors: Record<string, string> = { "Hombre": "#1D4ED8", "Masculino": "#1D4ED8", "Mujer": "#DB2777", "Femenino": "#DB2777", "Persona Jurídica": "#7C3AED", "Sin dato": "#64748B" }
       const alertMonths = Object.entries(byMonth).map(([mes]) => {
         const monthRows = rawFilteredRows.filter(row => monthLabel(firstText(row.fecha_recepcion, row.created_at, row.fecha_registro)) === mes)
@@ -1974,7 +2007,7 @@ const exportDashboardReport = () => {
 
 // ─── Cases View ───────────────────────────────────────────────────────────────
 
-function CasesView({ setView, openCase }: { setView: (v: View) => void; openCase: (caseId: string, mode?: "detail" | "form") => void }) {
+function CasesView({ setView, openCase, currentUser }: { setView: (v: View) => void; openCase: (caseId: string, mode?: "detail" | "form") => void; currentUser: SessionUser }) {
   const [search, setSearch] = useState("");
   const [filterRecordStatus, setFilterRecordStatus] = useState("Todos");
   const [filterStatus, setFilterStatus] = useState("Todos");
@@ -2048,6 +2081,15 @@ function CasesView({ setView, openCase }: { setView: (v: View) => void; openCase
       console.error("Error eliminando expediente:", error);
       return;
     }
+
+    await logAuditEvent({
+      usuario: currentUser.username,
+      accion: "ELIMINAR_EXPEDIENTE",
+      modulo: "Expedientes",
+      entidad: deleteId,
+      detalle: `Expediente ${deleteId} eliminado desde el módulo de expedientes.`,
+      tipo: "security",
+    });
 
     setCases(prev => prev.filter(c => c.id !== deleteId));
     setDeleteId(null);
@@ -2146,7 +2188,6 @@ function CasesView({ setView, openCase }: { setView: (v: View) => void; openCase
               filtered.map(c => [c.id, c.sentencia, c.imputado, c.delito, c.estatus, c.alerta, c.estReg, c.asignado, c.fecha]),
               "expedientes.xls"
             )}>Exportar Excel</Btn>
-            <Btn variant="secondary" icon={Printer} size="sm" onClick={triggerPrint}>Imprimir</Btn>
           </div>
         </div>
 
@@ -2163,7 +2204,7 @@ function CasesView({ setView, openCase }: { setView: (v: View) => void; openCase
     <option value="Prófugo">Prófugo</option>
     <option value="Rebeldía">Rebeldía</option>
     <option value="Recluido">Recluido</option>
-    <option value="Absuelto">Absuelto</option>
+    <option value="Libertad">Libertad</option>
   </select>
 </div>
 
@@ -2277,7 +2318,7 @@ function CasesView({ setView, openCase }: { setView: (v: View) => void; openCase
 function LocationTab({ isEdit }: { isEdit: boolean }) {
   const [provincia, setProvincia] = useState("Distrito Nacional");
   const [municipio, setMunicipio] = useState("Distrito Nacional");
-  const [sector, setSector] = useState("Centro");
+  const [sector, setSector] = useState("N/A");
   const [delito, setDelito] = useState("Lavado de activos");
 
   const municipios = useMemo(() => getMunicipios(provincia), [provincia]);
@@ -2295,9 +2336,10 @@ function LocationTab({ isEdit }: { isEdit: boolean }) {
           <select
             disabled={!isEdit}
             value={provincia}
-            onChange={e => { setProvincia(e.target.value); setMunicipio(getMunicipios(e.target.value)[0] ?? ""); setSector("Centro"); }}
+            onChange={e => { setProvincia(e.target.value); setMunicipio(getMunicipios(e.target.value)[0] ?? "N/A"); setSector("N/A"); }}
             className={inputCls}
           >
+            <option value="N/A">N/A</option>
             {PROVINCIAS.map(p => <option key={p}>{p}</option>)}
           </select>
         </div>
@@ -2308,9 +2350,10 @@ function LocationTab({ isEdit }: { isEdit: boolean }) {
           <select
             disabled={!isEdit}
             value={municipio}
-            onChange={e => { setMunicipio(e.target.value); setSector("Centro"); }}
+            onChange={e => { setMunicipio(e.target.value); setSector("N/A"); }}
             className={inputCls}
           >
+            <option value="N/A">N/A</option>
             {municipios.map(m => <option key={m}>{m}</option>)}
           </select>
         </div>
@@ -2324,7 +2367,8 @@ function LocationTab({ isEdit }: { isEdit: boolean }) {
             onChange={e => setSector(e.target.value)}
             className={inputCls}
           >
-            {sectores.map(s => <option key={s}>{s}</option>)}
+            <option value="N/A">N/A</option>
+            {sectores.filter(s => s !== "N/A").map(s => <option key={s}>{s}</option>)}
           </select>
         </div>
 
@@ -2403,6 +2447,19 @@ function CaseDetailView({
   const [caseUploadFile, setCaseUploadFile] = useState<File | null>(null);
   const [caseUploadDescription, setCaseUploadDescription] = useState("");
   const [analystOptions, setAnalystOptions] = useState<string[]>([]);
+  const [generalEdit, setGeneralEdit] = useState({
+    numeroExpediente: "",
+    fechaRecepcion: "",
+    sentencia: "",
+    tipoExpediente: "",
+    jurisdiccion: "",
+    localidad: "",
+    fechaDecision: "",
+    decision: "",
+    interpone: "",
+    estadoRegistro: "",
+    asignado: "",
+  });
 
   // ── Defendants state ──
   const [defs, setDefs] = useState<DefEntry[]>([]);
@@ -2451,7 +2508,67 @@ function CaseDetailView({
     });
   };
 
-  const handleSaveCaseEdit = () => {
+  const updateGeneralEdit = (key: keyof typeof generalEdit, value: string) => {
+    setGeneralEdit(prev => ({ ...prev, [key]: value }));
+  };
+
+  const handleSaveCaseEdit = async () => {
+    if (!activeCaseId) return;
+    const nextCaseNumber = generalEdit.numeroExpediente.trim() || activeCaseId;
+    const { error } = await supabase
+      .from("expedientes")
+      .update({
+        numero_expediente: nextCaseNumber,
+        fecha_recepcion: generalEdit.fechaRecepcion || null,
+        numero_sentencia: generalEdit.sentencia,
+        tipo_expediente: generalEdit.tipoExpediente,
+        jurisdiccion: generalEdit.jurisdiccion,
+        localidad_jurisdiccion: generalEdit.localidad,
+        fecha_decision: generalEdit.fechaDecision || null,
+        decision: generalEdit.decision,
+        quien_interpone: generalEdit.interpone,
+        estado_registro: generalEdit.estadoRegistro || "En Revisión",
+        asignado_a: generalEdit.asignado,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("numero_expediente", activeCaseId);
+
+    if (error) {
+      console.error("Error actualizando expediente:", error);
+      setDialog({
+        title: "No se pudo guardar",
+        message: "No fue posible actualizar el expediente. Verifique la conexión e intente nuevamente.",
+        variant: "danger",
+        confirmLabel: "Aceptar",
+        onConfirm: () => setDialog(null),
+      });
+      return;
+    }
+
+    await logAuditEvent({
+      usuario: currentUser.username,
+      accion: "EDITAR_EXPEDIENTE",
+      modulo: "Expedientes",
+      entidad: nextCaseNumber,
+      detalle: `Expediente actualizado. Estado del registro: ${generalEdit.estadoRegistro || "En Revisión"}.`,
+      tipo: "update",
+    });
+
+    setCaseRecord(prev => prev ? {
+      ...prev,
+      numero_expediente: nextCaseNumber,
+      fecha_recepcion: generalEdit.fechaRecepcion,
+      numero_sentencia: generalEdit.sentencia,
+      tipo_expediente: generalEdit.tipoExpediente,
+      jurisdiccion: generalEdit.jurisdiccion,
+      localidad_jurisdiccion: generalEdit.localidad,
+      fecha_decision: generalEdit.fechaDecision,
+      decision: generalEdit.decision,
+      quien_interpone: generalEdit.interpone,
+      estado_registro: generalEdit.estadoRegistro || "En Revisión",
+      asignado_a: generalEdit.asignado,
+    } : prev);
+
     setDialog({
       title: "Cambios guardados",
       message: "Los cambios del expediente se guardaron correctamente.",
@@ -2593,6 +2710,21 @@ function CaseDetailView({
         .maybeSingle();
       if (!active) return;
       setCaseRecord(expRow ?? null);
+      if (expRow) {
+        setGeneralEdit({
+          numeroExpediente: firstText(expRow.numero_expediente, expRow.no_expediente, expRow.expediente),
+          fechaRecepcion: toDateInputValue(expRow.fecha_recepcion, expRow.fecha_registro, expRow.created_at),
+          sentencia: firstText(expRow.numero_sentencia, expRow.no_sentencia, expRow.sentencia),
+          tipoExpediente: firstText(expRow.tipo_expediente, expRow.tipo),
+          jurisdiccion: firstText(expRow.jurisdiccion),
+          localidad: firstText(expRow.localidad_jurisdiccion),
+          fechaDecision: toDateInputValue(expRow.fecha_decision),
+          decision: firstText(expRow.decision),
+          interpone: firstText(expRow.quien_interpone),
+          estadoRegistro: firstText(expRow.estado_registro, "En Revisión"),
+          asignado: firstText(expRow.asignado_a, expRow.analista, expRow.usuario_asignado),
+        });
+      }
 
       const { data: imputadoRows } = await supabase
         .from("imputados")
@@ -2675,14 +2807,17 @@ function CaseDetailView({
     let active = true;
     supabase
       .from("usuarios")
-      .select("nombre_completo, usuario")
-      .eq("rol", "Analista")
+      .select("nombre_completo, usuario, rol")
       .eq("estatus", "Activo")
       .order("nombre_completo", { ascending: true })
       .then(({ data }) => {
         if (!active) return;
-        const names = (data ?? []).map(row => firstText(row.nombre_completo, row.usuario)).filter(Boolean);
-        setAnalystOptions(names.length > 0 ? names : ["Analista UCAPREC"]);
+        const names = (data ?? []).map(row => {
+          const name = firstText(row.nombre_completo, row.usuario);
+          const role = firstText(row.rol);
+          return role ? `${name} (${role})` : name;
+        }).filter(Boolean);
+        setAnalystOptions(names.length > 0 ? names : [currentUser.username]);
       });
     return () => {
       active = false;
@@ -2693,19 +2828,25 @@ function CaseDetailView({
   const inputCls = `w-full px-3 py-2 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground placeholder:text-muted-foreground/50 ${!isEdit ? "opacity-75 cursor-default" : ""}`;
   const labelCls = "block text-xs font-medium text-muted-foreground mb-1 uppercase tracking-wider";
 
-  const Field = ({ label, value, type = "text", required = false }: { label: string; value?: string; type?: string; required?: boolean }) => (
+  const Field = ({ label, value, type = "text", required = false, onChange }: { label: string; value?: string; type?: string; required?: boolean; onChange?: (value: string) => void }) => (
     <div>
       <label className={labelCls}>{label}{required && <span className="text-red-500 ml-0.5">*</span>}</label>
       {type === "textarea"
-        ? <textarea key={`${label}-${value}`} readOnly={!isEdit} defaultValue={value} rows={3} className={`${inputCls} resize-none`} />
-        : <input key={`${label}-${value}`} readOnly={!isEdit} type={type} defaultValue={value} className={inputCls} />
+        ? <textarea readOnly={!isEdit} value={value ?? ""} onChange={e => onChange?.(e.target.value)} rows={3} className={`${inputCls} resize-none`} />
+        : <input readOnly={!isEdit} type={type} value={value ?? ""} onChange={e => onChange?.(e.target.value)} className={inputCls} />
       }
     </div>
   );
-  const Sel = ({ label, value, options, required = false }: { label: string; value?: string; options: string[]; required?: boolean }) => (
+  const Sel = ({ label, value, options, required = false, onChange }: { label: string; value?: string; options: string[]; required?: boolean; onChange?: (value: string) => void }) => (
     <div>
       <label className={labelCls}>{label}{required && <span className="text-red-500 ml-0.5">*</span>}</label>
-      <select key={`${label}-${value}`} disabled={!isEdit} defaultValue={value} className={inputCls}>
+      <select
+        disabled={!isEdit}
+        value={value ?? ""}
+        onChange={e => onChange?.(e.target.value)}
+        className={inputCls}
+      >
+        <option value="">Seleccione una opción</option>
         {options.map(o => <option key={o} value={o}>{o}</option>)}
       </select>
     </div>
@@ -2914,7 +3055,6 @@ function CaseDetailView({
         <div className="flex gap-2 flex-wrap justify-end">
           {!isEdit && (
             <>
-              <Btn variant="secondary" icon={Printer} size="sm" onClick={triggerPrint}>Imprimir</Btn>
               <Btn variant="secondary" icon={FileSpreadsheet} size="sm" onClick={exportCaseCSV}>Exportar Excel</Btn>
               <Btn icon={Edit2} size="sm" onClick={() => setView("case-form")}>Editar</Btn>
             </>
@@ -2961,16 +3101,17 @@ function CaseDetailView({
           {/* Tab 0: General Data */}
           {tab === 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              <Field label="Fecha de recepción" value={firstText(caseRecord?.fecha_recepcion)} type="date" required />
-              <Field label="No. Sentencia / Resolución" value={activeCase?.sentencia} required />
-              <Sel label="Tipo de Expediente" value={activeCase?.tipo} options={TIPOS_EXPEDIENTE} required />
-              <Field label="Jurisdicción" value={firstText(caseRecord?.jurisdiccion)} required />
-              <Sel label="Localidad de Jurisdicción" value={firstText(caseRecord?.localidad_jurisdiccion)} options={JURISDICCIONES} />
-              <Field label="Fecha de la Decisión" value={firstText(caseRecord?.fecha_decision)} type="date" required />
-              <Sel label="Decisión" value={firstText(caseRecord?.decision)} options={DECISIONES} />
-              <Sel label="Quién Interpone el Recurso" value={firstText(caseRecord?.quien_interpone)} options={QUIEN_INTERPONE} />
-              <Sel label="Estado del Registro" value={activeCase?.estReg} options={ESTADOS_REGISTRO} />
-              <Sel label="Asignado a" value={activeCase?.asignado} options={analystOptions} />
+              <Field label="No. Expediente" value={generalEdit.numeroExpediente} onChange={v => updateGeneralEdit("numeroExpediente", v)} required />
+              <Field label="Fecha de recepción" value={generalEdit.fechaRecepcion} onChange={v => updateGeneralEdit("fechaRecepcion", v)} type="date" required />
+              <Field label="No. Sentencia / Resolución" value={generalEdit.sentencia} onChange={v => updateGeneralEdit("sentencia", v)} required />
+              <Sel label="Tipo de Expediente" value={generalEdit.tipoExpediente} onChange={v => updateGeneralEdit("tipoExpediente", v)} options={TIPOS_EXPEDIENTE} required />
+              <Field label="Jurisdicción" value={generalEdit.jurisdiccion} onChange={v => updateGeneralEdit("jurisdiccion", v)} required />
+              <Sel label="Localidad de Jurisdicción" value={generalEdit.localidad} onChange={v => updateGeneralEdit("localidad", v)} options={JURISDICCIONES} />
+              <Field label="Fecha de la Decisión" value={generalEdit.fechaDecision} onChange={v => updateGeneralEdit("fechaDecision", v)} type="date" required />
+              <Sel label="Decisión" value={generalEdit.decision} onChange={v => updateGeneralEdit("decision", v)} options={DECISIONES} />
+              <Sel label="Quién Interpone el Recurso" value={generalEdit.interpone} onChange={v => updateGeneralEdit("interpone", v)} options={QUIEN_INTERPONE} />
+              <Sel label="Estado del Registro" value={generalEdit.estadoRegistro} onChange={v => updateGeneralEdit("estadoRegistro", v)} options={ESTADOS_REGISTRO} />
+              <Sel label="Asignado a" value={generalEdit.asignado} onChange={v => updateGeneralEdit("asignado", v)} options={analystOptions} />
               <Field label="Creado por" value={firstText(caseRecord?.creado_por)} />
               <Field label="Fecha de Creación" value={formatDateTime(caseRecord?.created_at)} />
             </div>
@@ -3433,10 +3574,10 @@ function NewCaseView({ setView, currentUser }: { setView: (v: View) => void; cur
   };
 
   const handleSaveNewCase = async () => {
-    if (!general.numeroExpediente.trim() || !general.sentencia.trim() || !general.tipoExpediente.trim()) {
+    if (!general.numeroExpediente.trim()) {
       setDialog({
-        title: "Datos requeridos",
-        message: "Debe completar el número de expediente, el número de sentencia/resolución y el tipo de expediente.",
+        title: "Número de expediente requerido",
+        message: "Para guardar el registro se necesita al menos el número de expediente, porque es el identificador único del caso.",
         variant: "info",
         confirmLabel: "Entendido",
         onConfirm: () => setDialog(null),
@@ -3576,6 +3717,15 @@ function NewCaseView({ setView, currentUser }: { setView: (v: View) => void; cur
       ));
     }
 
+    await logAuditEvent({
+      usuario: currentUser.username,
+      accion: "CREAR_EXPEDIENTE",
+      modulo: "Expedientes",
+      entidad: caseNumber,
+      detalle: `Expediente creado con ${defs.length} imputado(s), ${vics.length} víctima(s) y ${newCaseFiles.length} documento(s).`,
+      tipo: "create",
+    });
+
     setSaving(false);
 
     setDialog({
@@ -3638,13 +3788,13 @@ function NewCaseView({ setView, currentUser }: { setView: (v: View) => void; cur
         <div className="p-6">
           <div className={tab === 0 ? "" : "hidden"}>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              <div><label className={labelCls}>No. Expediente<span className="text-red-500 ml-0.5">*</span></label><input value={general.numeroExpediente} onChange={e => updateGeneral("numeroExpediente", e.target.value)} className={inputCls} placeholder="Digite el número recibido" /></div>
-              <div><label className={labelCls}>Fecha de recepción<span className="text-red-500 ml-0.5">*</span></label><input type="date" value={general.fechaRecepcion} onChange={e => updateGeneral("fechaRecepcion", e.target.value)} className={inputCls} /></div>
-              <div><label className={labelCls}>No. Sentencia / Resolución<span className="text-red-500 ml-0.5">*</span></label><input value={general.sentencia} onChange={e => updateGeneral("sentencia", e.target.value)} className={inputCls} /></div>
-              <div><label className={labelCls}>Tipo de Expediente<span className="text-red-500 ml-0.5">*</span></label><select value={general.tipoExpediente} onChange={e => updateGeneral("tipoExpediente", e.target.value)} className={inputCls}><option value="">Seleccione una opción</option>{TIPOS_EXPEDIENTE.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-              <div><label className={labelCls}>Jurisdicción<span className="text-red-500 ml-0.5">*</span></label><input value={general.jurisdiccion} onChange={e => updateGeneral("jurisdiccion", e.target.value)} className={inputCls} /></div>
+              <div><label className={labelCls}>No. Expediente</label><input value={general.numeroExpediente} onChange={e => updateGeneral("numeroExpediente", e.target.value)} className={inputCls} placeholder="Digite el número recibido" /></div>
+              <div><label className={labelCls}>Fecha de recepción</label><input type="date" value={general.fechaRecepcion} onChange={e => updateGeneral("fechaRecepcion", e.target.value)} className={inputCls} /></div>
+              <div><label className={labelCls}>No. Sentencia / Resolución</label><input value={general.sentencia} onChange={e => updateGeneral("sentencia", e.target.value)} className={inputCls} /></div>
+              <div><label className={labelCls}>Tipo de Expediente</label><select value={general.tipoExpediente} onChange={e => updateGeneral("tipoExpediente", e.target.value)} className={inputCls}><option value="">Seleccione una opción</option>{TIPOS_EXPEDIENTE.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+              <div><label className={labelCls}>Jurisdicción</label><input value={general.jurisdiccion} onChange={e => updateGeneral("jurisdiccion", e.target.value)} className={inputCls} /></div>
               <div><label className={labelCls}>Localidad de Jurisdicción</label><select value={general.localidad} onChange={e => updateGeneral("localidad", e.target.value)} className={inputCls}><option value="">Seleccione una opción</option>{JURISDICCIONES.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-              <div><label className={labelCls}>Fecha de la Decisión<span className="text-red-500 ml-0.5">*</span></label><input type="date" value={general.fechaDecision} onChange={e => updateGeneral("fechaDecision", e.target.value)} className={inputCls} /></div>
+              <div><label className={labelCls}>Fecha de la Decisión</label><input type="date" value={general.fechaDecision} onChange={e => updateGeneral("fechaDecision", e.target.value)} className={inputCls} /></div>
               <div><label className={labelCls}>Decisión</label><select value={general.decision} onChange={e => updateGeneral("decision", e.target.value)} className={inputCls}><option value="">Seleccione una opción</option>{DECISIONES.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
               <div><label className={labelCls}>Quién Interpone el Recurso</label><select value={general.interpone} onChange={e => updateGeneral("interpone", e.target.value)} className={inputCls}><option value="">Seleccione una opción</option>{QUIEN_INTERPONE.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
               <div><label className={labelCls}>Estado del Registro</label><select value={general.estadoRegistro} onChange={e => updateGeneral("estadoRegistro", e.target.value)} className={inputCls}><option value="">Seleccione una opción</option>{ESTADOS_REGISTRO.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
@@ -3671,7 +3821,7 @@ function NewCaseView({ setView, currentUser }: { setView: (v: View) => void; cur
               <div className="border border-border rounded-lg p-4"><label className={labelCls}>Observaciones de medidas</label><textarea rows={3} className={`${inputCls} resize-none`} placeholder="Escriba observaciones sobre las medidas o alertas..." /></div>
             </div>
           </div>
-          <div className={tab === 4 ? "" : "hidden"}><div className="space-y-4"><div className="border border-border rounded-lg p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"><div><label className={labelCls}>Provincia<span className="text-red-500 ml-0.5">*</span></label><select value={location.provincia} onChange={e => setLocation(prev => ({ ...prev, provincia: e.target.value, municipio: "", sector: "" }))} className={inputCls}><option value="">Seleccione una provincia</option>{PROVINCIAS.map(p => <option key={p} value={p}>{p}</option>)}</select></div><div><label className={labelCls}>Municipio</label><select value={location.municipio} onChange={e => setLocation(prev => ({ ...prev, municipio: e.target.value, sector: "" }))} className={inputCls}><option value="">Seleccione un municipio</option>{municipios.map(m => <option key={m} value={m}>{m}</option>)}</select></div><div><label className={labelCls}>Sector</label><select value={location.sector} onChange={e => updateLocation("sector", e.target.value)} className={inputCls}><option value="">Seleccione un sector</option>{sectores.map(s => <option key={s} value={s}>{s}</option>)}</select></div><div className="sm:col-span-2 lg:col-span-3"><label className={labelCls}>Dirección Detallada</label><textarea rows={2} value={location.direccion} onChange={e => updateLocation("direccion", e.target.value)} className={`${inputCls} resize-none`} /></div><div><label className={labelCls}>Delito Principal<span className="text-red-500 ml-0.5">*</span></label><select value={location.delito} onChange={e => updateLocation("delito", e.target.value)} className={inputCls}><option value="">Seleccione un delito</option>{INFRACCIONES.map(inf => <option key={inf} value={inf}>{inf}</option>)}</select></div><div className="sm:col-span-2"><label className={labelCls}>Tipos Penales (texto libre)</label><input value={location.tiposPenales} onChange={e => updateLocation("tiposPenales", e.target.value)} className={inputCls} /></div></div></div></div>
+          <div className={tab === 4 ? "" : "hidden"}><div className="space-y-4"><div className="border border-border rounded-lg p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"><div><label className={labelCls}>Provincia</label><select value={location.provincia} onChange={e => setLocation(prev => ({ ...prev, provincia: e.target.value, municipio: "", sector: "" }))} className={inputCls}><option value="">Seleccione una provincia</option><option value="N/A">N/A</option>{PROVINCIAS.map(p => <option key={p} value={p}>{p}</option>)}</select></div><div><label className={labelCls}>Municipio</label><select value={location.municipio} onChange={e => setLocation(prev => ({ ...prev, municipio: e.target.value, sector: "" }))} className={inputCls}><option value="">Seleccione un municipio</option><option value="N/A">N/A</option>{municipios.map(m => <option key={m} value={m}>{m}</option>)}</select></div><div><label className={labelCls}>Sector</label><select value={location.sector} onChange={e => updateLocation("sector", e.target.value)} className={inputCls}><option value="">Seleccione un sector</option><option value="N/A">N/A</option>{sectores.filter(s => s !== "N/A").map(s => <option key={s} value={s}>{s}</option>)}</select></div><div className="sm:col-span-2 lg:col-span-3"><label className={labelCls}>Dirección Detallada</label><textarea rows={2} value={location.direccion} onChange={e => updateLocation("direccion", e.target.value)} className={`${inputCls} resize-none`} /></div><div><label className={labelCls}>Delito Principal</label><select value={location.delito} onChange={e => updateLocation("delito", e.target.value)} className={inputCls}><option value="">Seleccione un delito</option>{INFRACCIONES.map(inf => <option key={inf} value={inf}>{inf}</option>)}</select></div><div className="sm:col-span-2"><label className={labelCls}>Tipos Penales (texto libre)</label><input value={location.tiposPenales} onChange={e => updateLocation("tiposPenales", e.target.value)} className={inputCls} /></div></div></div></div>
           <div className={tab === 5 ? "" : "hidden"}><div className="space-y-4"><div className="border-2 border-dashed border-border rounded-lg p-8 flex flex-col items-center gap-3 hover:border-primary/40 transition-colors"><input id={newCaseFileInputId} type="file" multiple className="hidden" onChange={e => setNewCaseFiles(Array.from(e.target.files ?? []))} /><Upload size={24} className="text-muted-foreground" /><div className="text-center"><p className="text-sm font-medium text-foreground">Arrastre documentos aquí o haga clic para seleccionar</p><p className="text-xs text-muted-foreground mt-1">PDF, DOCX, XLSX, JPG, PNG — Máx. 20MB por archivo</p></div><Btn variant="secondary" size="sm" onClick={() => document.getElementById(newCaseFileInputId)?.click()}>Seleccionar archivos</Btn></div>{newCaseFiles.length === 0 ? <div className="flex flex-col items-center gap-3 py-10 text-muted-foreground border border-border rounded-lg"><FileText size={28} className="opacity-30" /><p className="text-sm">Todavía no hay documentos asociados a este expediente.</p></div> : <div className="border border-border rounded-lg overflow-hidden">{newCaseFiles.map(file => <div key={`${file.name}-${file.size}`} className="flex items-center gap-3 px-4 py-3 border-b border-border last:border-0"><FileText size={16} className="text-muted-foreground" /><div className="min-w-0 flex-1"><p className="text-sm font-medium text-foreground truncate">{file.name}</p><p className="text-xs text-muted-foreground">{(file.size / 1024 / 1024).toFixed(2)} MB</p></div><button className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-600" onClick={() => setNewCaseFiles(prev => prev.filter(item => item !== file))}><Trash2 size={14} /></button></div>)}</div>}</div></div>
           <div className={tab === 6 ? "" : "hidden"}><div className="space-y-4"><div><label className={labelCls}>Observación general del caso</label><textarea value={observation} onChange={e => setObservation(e.target.value)} rows={5} className={`${inputCls} resize-none`} placeholder="Escriba una observación general del expediente..." /></div><div className="border border-border rounded-lg overflow-hidden"><div className="bg-muted/30 px-4 py-2.5 border-b border-border"><p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Historial de Cambios</p></div><div className="px-4 py-10 text-center text-sm text-muted-foreground">Aún no hay historial para este nuevo expediente.</div></div></div></div>
         </div>
@@ -3714,140 +3864,187 @@ function NewCaseView({ setView, currentUser }: { setView: (v: View) => void; cur
 // ─── Analytics View ───────────────────────────────────────────────────────────
 
 function AnalyticsView() {
+  const [cases, setCases] = useState<typeof recentCases>([]);
+  const [users, setUsers] = useState<Array<{ usuario: string; nombre: string }>>([]);
+  const [filterDesde, setFilterDesde] = useState("");
+  const [filterHasta, setFilterHasta] = useState("");
+  const [filterTipo, setFilterTipo] = useState("Todos");
+  const [filterAnalista, setFilterAnalista] = useState("Todos");
+
+  useEffect(() => {
+    let active = true;
+
+    supabase
+      .from("expedientes")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(5000)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error("Error cargando analítica operativa:", error);
+          setCases([]);
+          return;
+        }
+        setCases((data ?? []).map(mapExpedienteRow));
+      });
+
+    supabase
+      .from("usuarios")
+      .select("usuario,nombre_completo")
+      .eq("estatus", "Activo")
+      .order("nombre_completo", { ascending: true })
+      .then(({ data }) => {
+        if (!active) return;
+        setUsers((data ?? []).map(row => ({
+          usuario: firstText(row.usuario),
+          nombre: firstText(row.nombre_completo, row.usuario),
+        })));
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const filtered = useMemo(() => {
+    return cases.filter(c => {
+      if (filterTipo !== "Todos" && c.tipo !== filterTipo) return false;
+      if (filterAnalista !== "Todos" && c.asignado !== filterAnalista) return false;
+      if (filterDesde || filterHasta) {
+        const [d, m, y] = c.fecha.split("/");
+        const date = new Date(`${y}-${m}-${d}`);
+        if (filterDesde && date < new Date(filterDesde)) return false;
+        if (filterHasta && date > new Date(filterHasta)) return false;
+      }
+      return true;
+    });
+  }, [cases, filterDesde, filterHasta, filterTipo, filterAnalista]);
+
+  const analystStats = useMemo(() => {
+    const grouped = new Map<string, { analista: string; total: number; verificados: number; revision: number; alertas: number; ultimo: string }>();
+    filtered.forEach(c => {
+      const analista = c.asignado || "Sin asignar";
+      const current = grouped.get(analista) ?? { analista, total: 0, verificados: 0, revision: 0, alertas: 0, ultimo: c.fecha || "—" };
+      current.total += 1;
+      if (c.estReg === "Verificado") current.verificados += 1;
+      if (c.estReg === "En Revisión") current.revision += 1;
+      if (c.alerta && c.alerta !== "—") current.alertas += 1;
+      current.ultimo = c.fecha || current.ultimo;
+      grouped.set(analista, current);
+    });
+    return Array.from(grouped.values()).sort((a, b) => b.total - a.total);
+  }, [filtered]);
+
+  const monthlyByAnalyst = useMemo(() => {
+    const months = new Map<string, Record<string, string | number>>();
+    filtered.forEach(c => {
+      const [d, m, y] = c.fecha.split("/");
+      const key = y && m ? `${m}/${y}` : "Sin fecha";
+      const row = months.get(key) ?? { mes: key };
+      const analyst = c.asignado || "Sin asignar";
+      row[analyst] = Number(row[analyst] ?? 0) + 1;
+      months.set(key, row);
+    });
+    return Array.from(months.values()).reverse().slice(-12);
+  }, [filtered]);
+
+  const topThree = analystStats.slice(0, 3);
+  const totalRegistros = filtered.length;
+  const activeAnalysts = analystStats.filter(a => a.total > 0).length;
+  const avgByAnalyst = activeAnalysts > 0 ? Math.round(totalRegistros / activeAnalysts) : 0;
+  const verifiedRate = totalRegistros > 0 ? Math.round((filtered.filter(c => c.estReg === "Verificado").length / totalRegistros) * 100) : 0;
+  const analystNames = analystStats.map(a => a.analista);
+  const lineColors = ["#1D4ED8", "#059669", "#D97706", "#B91C1C", "#7C3AED", "#0F766E"];
+
   return (
     <div className="p-6">
       <SectionHeader
         title="Analítica Operativa"
-        sub="Métricas avanzadas y tendencias del sistema UCAPREC"
+        sub="Productividad y trazabilidad de registros por usuario"
         action={
           <div className="flex gap-2">
-            <Btn variant="secondary" icon={Printer} size="sm" onClick={triggerPrint}>Imprimir</Btn>
             <Btn variant="secondary" icon={FileSpreadsheet} size="sm" onClick={() => downloadExcel(
-              ["Mes", "Casos"], evolutionData.map(d => [d.mes, d.casos]), "evolucion-casos.xls"
+              ["Analista", "Casos", "Verificados", "En Revisión", "Alertas", "Último Caso"],
+              analystStats.map(a => [a.analista, a.total, a.verificados, a.revision, a.alertas, a.ultimo]),
+              "analitica-operativa.xls"
             )}>Exportar Excel</Btn>
           </div>
         }
       />
 
-      {/* Filter strip with real catalogs */}
       <div className="flex flex-wrap gap-3 mb-6 px-4 py-3 bg-card border border-border rounded-lg">
         <div className="flex flex-col gap-0.5">
-          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Período</label>
-          <select className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[160px]">
-            {["2024 (Año completo)", "2023", "2022", "2021", "Último trimestre", "Último mes"].map(o => <option key={o}>{o}</option>)}
-          </select>
+          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Desde</label>
+          <input type="date" value={filterDesde} onChange={e => setFilterDesde(e.target.value)} className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[145px]" />
         </div>
         <div className="flex flex-col gap-0.5">
-          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Jurisdicción</label>
-          <select className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[160px]">
-            <option>Todas</option>
-            {JURISDICCIONES.map(j => <option key={j}>{j}</option>)}
-          </select>
+          <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Hasta</label>
+          <input type="date" value={filterHasta} onChange={e => setFilterHasta(e.target.value)} className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[145px]" />
         </div>
         <div className="flex flex-col gap-0.5">
           <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Tipo de Expediente</label>
-          <select className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[160px]">
-            <option>Todos</option>
+          <select value={filterTipo} onChange={e => setFilterTipo(e.target.value)} className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[160px]">
+            <option value="Todos">Todos</option>
             {TIPOS_EXPEDIENTE.map(t => <option key={t}>{t}</option>)}
           </select>
         </div>
         <div className="flex flex-col gap-0.5">
           <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Analista</label>
-          <select className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[140px]">
-            <option>Todos</option>
-            {["Ana Rodríguez", "Luis Peña", "María Santos", "Pedro Álvarez"].map(a => <option key={a}>{a}</option>)}
+          <select value={filterAnalista} onChange={e => setFilterAnalista(e.target.value)} className="text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 text-foreground outline-none min-w-[180px]">
+            <option value="Todos">Todos</option>
+            {Array.from(new Set([...users.map(u => u.nombre), ...cases.map(c => c.asignado).filter(Boolean)])).map(a => <option key={a}>{a}</option>)}
           </select>
         </div>
+        {(filterDesde || filterHasta || filterTipo !== "Todos" || filterAnalista !== "Todos") && (
+          <button onClick={() => { setFilterDesde(""); setFilterHasta(""); setFilterTipo("Todos"); setFilterAnalista("Todos"); }} className="self-end text-xs text-primary hover:underline flex items-center gap-1 px-2 py-1.5">
+            <X size={10} /> Limpiar
+          </button>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-card border border-border rounded-lg p-5">
-          <h3 className="font-semibold text-foreground text-sm mb-1">Evolución Anual de Casos</h3>
-          <p className="text-xs text-muted-foreground mb-4">Nuevos expedientes registrados por mes</p>
-          <ResponsiveContainer width="100%" height={220}>
-            <AreaChart data={evolutionData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-              <defs>
-                <linearGradient id="gradA" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#1D4ED8" stopOpacity={0.25} />
-                  <stop offset="95%" stopColor="#1D4ED8" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="mes" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }} />
-              <Area type="monotone" dataKey="casos" stroke="#1D4ED8" strokeWidth={2} fill="url(#gradA)" dot={{ r: 3, fill: "#1D4ED8" }} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+        <KPICard label="Registros filtrados" value={totalRegistros} icon={FolderOpen} bg="bg-blue-50 dark:bg-blue-900/20" fg="text-blue-700 dark:text-blue-400" />
+        <KPICard label="Analistas activos" value={activeAnalysts} icon={Users} bg="bg-teal-50 dark:bg-teal-900/20" fg="text-teal-700 dark:text-teal-400" />
+        <KPICard label="Promedio por analista" value={avgByAnalyst} icon={BarChart2} bg="bg-violet-50 dark:bg-violet-900/20" fg="text-violet-700 dark:text-violet-400" />
+        <KPICard label="Tasa verificada" value={`${verifiedRate}%`} icon={CheckCircle} bg="bg-emerald-50 dark:bg-emerald-900/20" fg="text-emerald-700 dark:text-emerald-400" />
+      </div>
 
-        <div className="bg-card border border-border rounded-lg p-5">
-          <h3 className="font-semibold text-foreground text-sm mb-1">Alertas por Tipo — Mensual</h3>
-          <p className="text-xs text-muted-foreground mb-4">Últimos 6 meses</p>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={alertsByMonthData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="xl:col-span-2 bg-card border border-border rounded-lg p-5">
+          <h3 className="font-semibold text-foreground text-sm mb-1">Línea de tiempo mensual por analista</h3>
+          <p className="text-xs text-muted-foreground mb-4">Registros realizados o asignados por mes</p>
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={monthlyByAnalyst} margin={{ top: 4, right: 10, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="mes" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
               <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Bar key="ana-roja" dataKey="roja" name="Alerta Roja" fill="#B91C1C" radius={[2, 2, 0, 0]}>
-                <LabelList dataKey="roja" position="top" style={{ fontSize: 9, fill: "var(--muted-foreground)", fontFamily: "monospace" }} />
-              </Bar>
-              <Bar key="ana-migratoria" dataKey="migratoria" name="Migratoria" fill="#4F46E5" radius={[2, 2, 0, 0]}>
-                <LabelList dataKey="migratoria" position="top" style={{ fontSize: 9, fill: "var(--muted-foreground)", fontFamily: "monospace" }} />
-              </Bar>
-              <Bar key="ana-arresto" dataKey="arresto" name="Arresto" fill="#D97706" radius={[2, 2, 0, 0]}>
-                <LabelList dataKey="arresto" position="top" style={{ fontSize: 9, fill: "var(--muted-foreground)", fontFamily: "monospace" }} />
-              </Bar>
-            </BarChart>
+              {analystNames.slice(0, 6).map((name, index) => (
+                <Line key={name} type="monotone" dataKey={name} stroke={lineColors[index % lineColors.length]} strokeWidth={2} dot={{ r: 3 }} />
+              ))}
+            </LineChart>
           </ResponsiveContainer>
         </div>
 
         <div className="bg-card border border-border rounded-lg p-5">
-          <h3 className="font-semibold text-foreground text-sm mb-1">Distribución por Tipo de Expediente</h3>
-          <p className="text-xs text-muted-foreground mb-4">Total de registros</p>
-          <ResponsiveContainer width="100%" height={160}>
-            <PieChart>
-              <Pie data={byTypeData} cx="50%" cy="50%" outerRadius={65} dataKey="value">
-                {byTypeData.map((entry) => <Cell key={`type-${entry.name}`} fill={entry.fill} />)}
-              </Pie>
-              <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }} />
-            </PieChart>
-          </ResponsiveContainer>
-          <div className="space-y-2 mt-2">
-            {byTypeData.map((item, i) => {
-              const total = byTypeData.reduce((s, d) => s + d.value, 0);
-              return (
-                <div key={i} className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: item.fill }} />
-                    <span className="text-muted-foreground">{item.name}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-medium text-foreground">{item.value.toLocaleString()}</span>
-                    <span className="text-muted-foreground/60 font-mono">({total > 0 ? Math.round(item.value / total * 100) : 0}%)</span>
-                  </div>
+          <h3 className="font-semibold text-foreground text-sm mb-1">Top 3 analistas</h3>
+          <p className="text-xs text-muted-foreground mb-4">Mayor volumen de registros filtrados</p>
+          <div className="space-y-3">
+            {topThree.length === 0 ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">No hay registros para mostrar.</div>
+            ) : topThree.map((item, index) => (
+              <div key={item.analista} className="flex items-center gap-3 rounded-lg border border-border p-3">
+                <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-sm font-bold">{index + 1}</div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-foreground truncate">{item.analista}</p>
+                  <p className="text-xs text-muted-foreground">{item.verificados} verificados · {item.revision} en revisión</p>
                 </div>
-              );
-            })}
+                <span className="font-mono text-lg font-semibold text-foreground">{item.total}</span>
+              </div>
+            ))}
           </div>
-        </div>
-
-        <div className="bg-card border border-border rounded-lg p-5">
-          <h3 className="font-semibold text-foreground text-sm mb-1">Casos por Jurisdicción</h3>
-          <p className="text-xs text-muted-foreground mb-4">Distribución geográfica</p>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={districtData} layout="vertical" margin={{ left: 10, right: 20, top: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 10, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 10, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11 }} />
-              <Bar key="ana-casos" dataKey="casos" fill="#059669" radius={[0, 3, 3, 0]} barSize={12}>
-                <LabelList dataKey="casos" position="right" style={{ fontSize: 10, fill: "var(--muted-foreground)", fontFamily: "monospace" }} />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
         </div>
       </div>
 
@@ -3858,11 +4055,14 @@ function AnalyticsView() {
         </div>
         <Table
           headers={["Analista", "Casos Asignados", "Verificados", "En Revisión", "Alertas Activas", "Último Caso"]}
-          rows={[
-            ["Ana Rodríguez", <span className="font-mono">47</span>, <span className="font-mono text-emerald-600">38</span>, <span className="font-mono text-amber-600">9</span>, <span className="font-mono text-red-600">14</span>, "28/11/2024"],
-            ["Luis Peña", <span className="font-mono">31</span>, <span className="font-mono text-emerald-600">27</span>, <span className="font-mono text-amber-600">4</span>, <span className="font-mono text-red-600">8</span>, "27/11/2024"],
-            ["Pedro Álvarez", <span className="font-mono">28</span>, <span className="font-mono text-emerald-600">22</span>, <span className="font-mono text-amber-600">6</span>, <span className="font-mono text-red-600">6</span>, "24/11/2024"],
-          ]}
+          rows={analystStats.map(a => [
+            a.analista,
+            <span className="font-mono">{a.total}</span>,
+            <span className="font-mono text-emerald-600">{a.verificados}</span>,
+            <span className="font-mono text-amber-600">{a.revision}</span>,
+            <span className="font-mono text-red-600">{a.alertas}</span>,
+            a.ultimo,
+          ])}
         />
       </div>
     </div>
@@ -4728,7 +4928,7 @@ function DefendantsView({ setView, openAddImputado }: { setView: (v: View) => vo
               placeholder="Buscar por nombre, cédula, expediente…" />
           </div>
           <div className="flex gap-1.5 flex-wrap">
-            {["Todos", "Prófugo", "Rebeldía", "Recluido", "Absuelto"].map(s => (
+            {["Todos", "Prófugo", "Rebeldía", "Recluido", "Libertad"].map(s => (
               <button key={s} onClick={() => setFilterStatus(s)}
                 className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${filterStatus === s ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-muted"}`}>
                 {s}
@@ -4921,7 +5121,7 @@ const victimasData = [
   { id: 7, nombre: "Inversiones y Comercio del Este S.R.L.", tipo: "Persona Jurídica", exp: "EXP-2024-1842", imputado: "Danilo F. Rosario Ureña", delito: "Robo Agravado", fecha: "23/11/2024" },
 ];
 
-function VictimsView({ setView }: { setView: (v: View) => void }) {
+function VictimsView({ setView, currentUser }: { setView: (v: View) => void; currentUser: SessionUser }) {
   type VicRow = typeof victimasData[0];
   const [vics, setVics] = useState<VicRow[]>([]);
   const [search, setSearch] = useState("");
@@ -4986,6 +5186,14 @@ function VictimsView({ setView }: { setView: (v: View) => void }) {
       console.error("Error registrando víctima:", error);
       return;
     }
+    await logAuditEvent({
+      usuario: currentUser.username,
+      accion: "CREAR_VICTIMA",
+      modulo: "Víctimas",
+      entidad: newVic.exp,
+      detalle: `Víctima ${newVic.nombre} registrada en el expediente ${newVic.exp}.`,
+      tipo: "create",
+    });
     setVics(p => [...p, { id: Date.now(), ...newVic, fecha: new Date().toLocaleDateString("es-DO") }]);
     setNewVic({ exp: "", tipo: "Persona Física", nombre: "", imputado: "", delito: "" });
     setModal(null);
@@ -5009,6 +5217,15 @@ function VictimsView({ setView }: { setView: (v: View) => void }) {
       return;
     }
 
+    await logAuditEvent({
+      usuario: currentUser.username,
+      accion: "EDITAR_VICTIMA",
+      modulo: "Víctimas",
+      entidad: selected.exp,
+      detalle: `Víctima ${selected.nombre} actualizada.`,
+      tipo: "update",
+    });
+
     setVics(p => p.map(v => v.id === selected.id ? { ...v, ...editForm } as VicRow : v));
     setModal(null);
   };
@@ -5025,6 +5242,15 @@ function VictimsView({ setView }: { setView: (v: View) => void }) {
       console.error("Error eliminando víctima:", error);
       return;
     }
+
+    await logAuditEvent({
+      usuario: currentUser.username,
+      accion: "ELIMINAR_VICTIMA",
+      modulo: "Víctimas",
+      entidad: selected.exp,
+      detalle: `Víctima ${selected.nombre} eliminada del expediente ${selected.exp}.`,
+      tipo: "security",
+    });
 
     setVics(p => p.filter(v => v.id !== selected.id));
     setModal(null);
@@ -5061,7 +5287,6 @@ function VictimsView({ setView }: { setView: (v: View) => void }) {
               filtered.map(v => [v.nombre, v.tipo, v.exp, v.imputado, v.delito, v.fecha]),
               "victimas.xls"
             )}>Exportar Excel</Btn>
-            <Btn variant="secondary" icon={Printer} size="sm" onClick={triggerPrint}>Imprimir</Btn>
           </div>
         </div>
         {(search || filterTipo !== "Todos") && (
@@ -5398,9 +5623,17 @@ function MeasuresView({ setView, currentUser }: { setView: (v: View) => void; cu
           return;
         }
       }
+      await logAuditEvent({
+        usuario: currentUser.username,
+        accion: "EDITAR_MEDIDA_ALERTA",
+        modulo: "Medidas y Alertas",
+        entidad: measureForm.exp,
+        detalle: `${measureForm.tipo} actualizada para ${measureForm.imputado}.`,
+        tipo: "update",
+      });
       setMeasures(prev => prev.map(m => m.id === editingId ? { ...m, ...measureForm } : m));
     } else {
-      await supabase.from("medidas_alertas_expediente").insert({
+      const { error } = await supabase.from("medidas_alertas_expediente").insert({
         numero_expediente: measureForm.exp,
         tipo_medida: measureForm.tipo,
         imputado: measureForm.imputado,
@@ -5408,6 +5641,18 @@ function MeasuresView({ setView, currentUser }: { setView: (v: View) => void; cu
         activada_por: measureForm.activadaPor,
         activa: measureForm.activa,
         observacion: measureForm.obs,
+      });
+      if (error) {
+        console.error("Error registrando medida:", error);
+        return;
+      }
+      await logAuditEvent({
+        usuario: currentUser.username,
+        accion: "CREAR_MEDIDA_ALERTA",
+        modulo: "Medidas y Alertas",
+        entidad: measureForm.exp,
+        detalle: `${measureForm.tipo} registrada para ${measureForm.imputado}.`,
+        tipo: "create",
       });
       setMeasures(prev => [...prev, { id: Date.now(), ...measureForm }]);
     }
@@ -5435,6 +5680,15 @@ function MeasuresView({ setView, currentUser }: { setView: (v: View) => void; cu
           console.error("Error eliminando medida:", error);
           return;
         }
+
+        await logAuditEvent({
+          usuario: currentUser.username,
+          accion: "ELIMINAR_MEDIDA_ALERTA",
+          modulo: "Medidas y Alertas",
+          entidad: measure.exp,
+          detalle: `${measure.tipo} eliminada para ${measure.imputado}.`,
+          tipo: "security",
+        });
 
         setDialog(null);
         setMeasures(prev => prev.filter(m => m.id !== measure.id));
@@ -5898,6 +6152,15 @@ function DocumentsView({ setView, currentUser }: { setView: (v: View) => void; c
       return;
     }
 
+    await logAuditEvent({
+      usuario: currentUser.username,
+      accion: "SUBIR_DOCUMENTO",
+      modulo: "Documentos",
+      entidad: uploadForm.exp,
+      detalle: `Documento ${fileName} subido al expediente ${uploadForm.exp}.`,
+      tipo: "create",
+    });
+
     setDocs(prev => [{
       id: Date.now(),
       nombre: fileName,
@@ -5940,6 +6203,15 @@ function DocumentsView({ setView, currentUser }: { setView: (v: View) => void; c
       const { error: storageError } = await supabase.storage.from("documentos").remove([target.ruta]);
       if (storageError) console.error("Error eliminando archivo de Storage:", storageError);
     }
+
+    await logAuditEvent({
+      usuario: currentUser.username,
+      accion: "ELIMINAR_DOCUMENTO",
+      modulo: "Documentos",
+      entidad: target.exp,
+      detalle: `Documento ${target.nombre} eliminado del expediente ${target.exp}.`,
+      tipo: "security",
+    });
 
     setDocs(p => p.filter(d => d.id !== deleteId));
     setDeleteId(null);
@@ -6939,7 +7211,7 @@ export default function App() {
 
     switch (view) {
       case "dashboard": return <DashboardView setView={navigate} />;
-      case "cases": return <CasesView setView={navigate} openCase={openCaseFromList} />;
+      case "cases": return <CasesView setView={navigate} openCase={openCaseFromList} currentUser={currentUser} />;
       case "case-detail": return <CaseDetailView setView={navigate} mode="detail" selectedCaseId={selectedCaseId} currentUser={currentUser} />;
       case "case-form": return (
         <CaseDetailView
@@ -6954,7 +7226,7 @@ export default function App() {
       );
       case "case-new": return <NewCaseView setView={navigate} currentUser={currentUser} />;
       case "defendants": return <DefendantsView setView={navigate} openAddImputado={openAddImputadoFromDefendants} />;
-      case "victims": return <VictimsView setView={navigate} />;
+      case "victims": return <VictimsView setView={navigate} currentUser={currentUser} />;
       case "measures": return <MeasuresView setView={navigate} currentUser={currentUser} />;
       case "documents": return <DocumentsView setView={navigate} currentUser={currentUser} />;
       case "notifications": return <NotificationsView openCaseFromNotification={openCaseFromNotification} />;
