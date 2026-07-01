@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, type FormEvent, type ReactNode } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, type FormEvent, type ReactNode } from "react";
 import {
   PROVINCIAS, getMunicipios, getSectores,
   INFRACCIONES, CENTROS_PENITENCIARIOS, JURISDICCIONES, NACIONALIDADES,
@@ -7,12 +7,13 @@ import {
 } from "../data/catalogs";
 import {
   LayoutDashboard, FolderOpen, Users, UserX, Shield, FileText,
+  User,
   BarChart2, Settings, LogOut, Bell, Search, Moon, Sun,
   AlertTriangle, CheckCircle, Clock, Eye, Edit2, Trash2, Plus,
   Download, Filter, ChevronRight, ChevronLeft, X, MapPin, AlertOctagon,
   BookOpen, Activity, Database, TrendingUp, ArrowUpRight,
   ArrowDownRight, Scale, Gavel, Building2, Globe, ChevronDown,
-  Upload, Lock, RefreshCw, Menu, UserCheck, FileSearch, Layers,
+  Upload, Lock, RefreshCw, Menu, UserCheck, FileSearch, Layers, EyeOff,
   CheckSquare, AlertCircle, Info, Printer, FileSpreadsheet, ArrowLeft
 } from "lucide-react";
 import {
@@ -28,15 +29,16 @@ import { supabase } from '../lib/supabase'
 type View =
   | "dashboard" | "cases" | "case-detail" | "case-form" | "case-new"
   | "defendants" | "victims" | "measures" | "documents"
-  | "reports" | "analytics" | "notifications" | "users" | "audit" | "catalogs" | "settings";
+  | "reports" | "analytics" | "notifications" | "users" | "audit" | "catalogs" | "settings" | "profile";
 
 interface NavItem { id: View; label: string; icon: any; badge?: number }
 interface NavGroup { label: string; items: NavItem[] }
-interface SessionUser { name: string; username: string; email: string; role: string; initials: string }
+interface SessionUser { id: string; name: string; username: string; email: string; role: string; initials: string }
 
 // ─── Temporary access user ───────────────────────────────────────────────────
 
 const ADMIN_USER: SessionUser = {
+  id: "temp-admin",
   name: "Michael Custodio",
   username: "michael.custodio",
   email: "michael.custodio@pgr.gob.do",
@@ -71,6 +73,7 @@ const sessionUserFromAuthUser = (authUser: any): SessionUser => {
     : firstText(appMeta.role, userMeta.role, "Analista");
 
   return {
+    id: firstText(authUser?.id),
     name,
     username,
     email,
@@ -267,20 +270,31 @@ const mapExpedienteRow = (row: DbRow, idx: number): typeof recentCases[number] &
   asignado: firstText(row.asignado_a, row.analista, row.usuario_asignado),
 });
 
-const mapImputadoRow = (row: DbRow, idx: number): typeof defendants[number] => ({
+const mapImputadoRow = (row: DbRow, idx: number): DefEntry => ({
   id: firstId(idx + 1, row.id, row.imputado_id),
+  dbId: firstText(row.id, row.imputado_id),
   nombre: firstText(row.nombre_completo, row.nombre, row.razon_social),
   doc: firstText(row.documento, row.cedula, row.rnc, row.identificacion),
-  edad: firstId(0, row.edad),
-  sexo: firstText(row.sexo, row.tipo_persona),
-  estatus: firstText(row.estado_imputado, row.estatus, row.estado),
-  estJud: firstText(row.estado_judicial, row.estatus_judicial),
-  pena: firstText(row.pena, row.pena_impuesta),
+  edad: firstText(row.edad, row.age, ""),
+  sexo: firstText(row.sexo, row.genero, row.sexo_registrado, row.sexo_persona, "Sin dato"),
+  estadoImp: firstText(row.estado_imputado, row.estatus, row.estado),
+  estadoJud: firstText(row.estado_judicial, row.estatus_judicial),
+  centro: firstText(row.centro_penitenciario, row.centro, row.penal),
+  penaImp: firstText(row.pena, row.pena_impuesta),
+  penaPriv: firstText(row.pena_privativa, row.pena_privativa_anos),
+  penaSusp: firstText(row.pena_suspendida, row.pena_suspendida_anos),
+  indemnizacion: firstText(row.indemnizacion, row.indemnizacion_rd),
+  garantia: firstText(row.garantia_economica, row.garantia_rd),
+  multa: firstText(row.multa, row.multa_rd),
+  decomiso: firstText(row.decomiso),
   alertaRoja: firstBool(row.alerta_roja, row.alerta_interpol),
   alertaMig: firstBool(row.alerta_migratoria),
   ordenArresto: firstBool(row.orden_arresto),
   policia: firstBool(row.subido_pn, row.subido_a_pn, row.policia),
   exp: firstText(row.numero_expediente, row.expediente, row.expediente_id),
+  estatus: firstText(row.estado_imputado, row.estatus, row.estado),
+  estJud: firstText(row.estado_judicial, row.estatus_judicial),
+  pena: firstText(row.pena, row.pena_impuesta),
 });
 
 const mapUsuarioRow = (row: DbRow, idx: number): typeof usersData[number] => ({
@@ -437,14 +451,15 @@ function hasUnsavedDefData(def: Omit<DefEntry, "id">) {
 // ─── Shared defendant / victim types ─────────────────────────────────────────
 
 interface DefEntry {
-  id: number; tipo: string; nombre: string; doc: string; edad: string;
+  id: number; dbId?: string; tipo: string; nombre: string; doc: string; edad: string;
   sexo: string; nac: string; estadoImp: string; estadoJud: string; centro: string;
   penaImp: string; penaPriv: string; penaSusp: string;
   indemnizacion: string; garantia: string; multa: string; decomiso: string;
   subidoPN: boolean; arresto: boolean; alertaRoja: boolean; alertaMig: boolean;
+  exp?: string; estatus?: string; estJud?: string; pena?: string; policia?: boolean; ordenArresto?: boolean;
 }
 
-interface VicEntry { id: number; tipo: string; nombre: string; }
+interface VicEntry { id: number; dbId?: string; tipo: string; nombre: string; }
 
 const EMPTY_DEF: Omit<DefEntry, "id"> = {
   tipo: "", nombre: "", doc: "", edad: "", sexo: "",
@@ -486,6 +501,8 @@ const ADMIN_MENU: { id: View; label: string; icon: any }[] = [
   { id: "catalogs", label: "Catálogos", icon: BookOpen },
   { id: "settings", label: "Configuración", icon: Settings },
 ];
+
+const PROFILE_MENU_ITEM = { id: "profile" as View, label: "Perfil", icon: User };
 
 const ADMIN_LOGOUT_ITEM = { label: "Cerrar Sesión", icon: LogOut };
 
@@ -651,14 +668,27 @@ function SearchBar({ placeholder }: { placeholder?: string }) {
   );
 }
 
-function Table({ headers, rows }: { headers: string[]; rows: ReactNode[][] }) {
+function Table({
+  headers,
+  rows,
+  columnClasses = [],
+}: {
+  headers: string[];
+  rows: ReactNode[][];
+  columnClasses?: string[];
+}) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border">
-            {headers.map(h => (
-              <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">{h}</th>
+            {headers.map((h, idx) => (
+              <th
+                key={h}
+                className={`text-left py-3 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap ${columnClasses[idx] ?? ""}`}
+              >
+                {h}
+              </th>
             ))}
           </tr>
         </thead>
@@ -666,7 +696,7 @@ function Table({ headers, rows }: { headers: string[]; rows: ReactNode[][] }) {
           {rows.map((row, i) => (
             <tr key={i} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
               {row.map((cell, j) => (
-                <td key={j} className="py-3 px-3 text-foreground">{cell}</td>
+                <td key={j} className={`py-3 px-3 text-foreground ${columnClasses[j] ?? ""}`}>{cell}</td>
               ))}
             </tr>
           ))}
@@ -967,6 +997,26 @@ function TopBar({
 }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
+  const notifMenuRef = useRef<HTMLDivElement | null>(null);
+  const adminMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (notifMenuRef.current && notifMenuRef.current.contains(target)) return;
+      if (adminMenuRef.current && adminMenuRef.current.contains(target)) return;
+      setNotifOpen(false);
+      setAdminMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+    };
+  }, []);
 
   return (
     <header className="h-14 flex items-center justify-between px-4 border-b border-blue-900/30 bg-[#1a3a6e] sticky top-0 z-10 shadow-md">
@@ -1003,7 +1053,7 @@ function TopBar({
       {/* Right: search, notifications, dark mode, admin menu */}
       <div className="flex items-center gap-2 flex-shrink-0">
         {/* Notifications */}
-        <div className="relative">
+        <div className="relative" ref={notifMenuRef}>
           <button
             onClick={() => {
               setNotifOpen(!notifOpen);
@@ -1076,24 +1126,35 @@ function TopBar({
         </button>
 
         {/* Admin menu - right */}
-        {canAccessAdmin && <div className="relative">
+        <div className="relative" ref={adminMenuRef}>
           <button
             onClick={() => {
               setAdminMenuOpen(!adminMenuOpen);
               if (notifOpen) setNotifOpen(false);
             }}
             className="w-8 h-8 flex items-center justify-center rounded-md text-blue-200 hover:text-white hover:bg-white/10 transition-colors"
-            title="Menú de administración"
+            title={canAccessAdmin ? "Menú de administración" : "Menú de usuario"}
           >
             <Menu size={16} />
           </button>
           {adminMenuOpen && (
-            <div className="absolute right-0 top-11 w-56 bg-card border border-border rounded-lg shadow-xl z-50 overflow-hidden">
+            <div className="absolute right-0 top-11 w-60 bg-card border border-border rounded-lg shadow-xl z-50 overflow-hidden">
               <div className="px-4 py-3 border-b border-border bg-muted/20">
-                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Administración</span>
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{canAccessAdmin ? "Administración" : "Menú de usuario"}</span>
               </div>
               <div className="py-1.5">
-                {ADMIN_MENU.map(item => {
+                <button
+                  onClick={() => {
+                    setAdminMenuOpen(false);
+                    navigateModule(PROFILE_MENU_ITEM.id);
+                  }}
+                  className={`w-full flex items-center gap-2 px-4 py-2 text-sm transition-colors ${breadcrumb[breadcrumb.length - 1] === PROFILE_MENU_ITEM.id ? "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300" : "text-foreground hover:bg-muted/60"}`}
+                >
+                  <PROFILE_MENU_ITEM.icon size={15} className="flex-shrink-0" />
+                  <span className="truncate">{PROFILE_MENU_ITEM.label}</span>
+                </button>
+                {canAccessAdmin && <div className="my-1 border-t border-border" />}
+                {canAccessAdmin && ADMIN_MENU.map(item => {
                   const active = breadcrumb[breadcrumb.length - 1] === item.id;
                   return (
                     <button
@@ -1106,7 +1167,7 @@ function TopBar({
                     >
                       <item.icon size={15} className="flex-shrink-0" />
                       <span className="truncate">{item.label}</span>
-                    </button>
+                      </button>
                   );
                 })}
                 <div className="my-1 border-t border-border" />
@@ -1123,7 +1184,7 @@ function TopBar({
               </div>
             </div>
           )}
-        </div>}
+        </div>
       </div>
     </header>
   );
@@ -2502,6 +2563,7 @@ function CaseDetailView({
   selectedCaseId,
   currentUser,
   canEditCases = true,
+  returnToView = "cases",
   onConsumedAutoOpenAddDefModal,
 }: {
   setView: (v: View) => void;
@@ -2511,6 +2573,7 @@ function CaseDetailView({
   selectedCaseId?: string;
   currentUser: SessionUser;
   canEditCases?: boolean;
+  returnToView?: View;
   onConsumedAutoOpenAddDefModal?: () => void;
 }) {
   const isEdit = mode === "form" && canEditCases;
@@ -2578,7 +2641,7 @@ function CaseDetailView({
       cancelLabel: "Volver",
       onConfirm: () => {
         setDialog(null);
-        setView("cases");
+        setView(returnToView);
       },
       onCancel: () => setDialog(null),
     });
@@ -2591,6 +2654,10 @@ function CaseDetailView({
   const handleSaveCaseEdit = async () => {
     if (!activeCaseId) return;
     const nextCaseNumber = generalEdit.numeroExpediente.trim() || activeCaseId;
+    const parseMoney = (value: string) => {
+      const normalized = String(value ?? "").trim().replace(/,/g, "");
+      return normalized === "" ? null : Number(normalized);
+    };
     const auditDetail = describeFieldChanges([
       { campo: "No. expediente", antes: activeCaseId, despues: nextCaseNumber },
       { campo: "No. sentencia / resolución", antes: firstText(caseRecord?.numero_sentencia), despues: generalEdit.sentencia },
@@ -2650,6 +2717,108 @@ function CaseDetailView({
       if (measureNoteError) console.error("Error actualizando observaciones de medidas:", measureNoteError);
     }
 
+    for (const def of defs) {
+      const defPayload = {
+        expediente_id: caseRecord?.id ?? null,
+        numero_expediente: nextCaseNumber,
+        tipo_persona: def.tipo,
+        nombre_completo: def.nombre,
+        documento: def.doc || null,
+        edad: def.edad ? Number(def.edad) : null,
+        sexo: def.sexo || null,
+        nacionalidad: def.nac || null,
+        estado_imputado: def.estadoImp || null,
+        estado_judicial: def.estadoJud || null,
+        centro_penitenciario: def.centro || null,
+        pena: def.penaImp ? `${def.penaImp} años` : "",
+        pena_impuesta: parseMoney(def.penaImp),
+        pena_privativa: parseMoney(def.penaPriv),
+        pena_suspendida: parseMoney(def.penaSusp),
+        indemnizacion: parseMoney(def.indemnizacion),
+        garantia: parseMoney(def.garantia),
+        multa: parseMoney(def.multa),
+        decomiso: def.decomiso || null,
+        alerta_roja: def.alertaRoja,
+        alerta_migratoria: def.alertaMig,
+        orden_arresto: def.arresto,
+        subido_a_pn: def.subidoPN,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (def.dbId) {
+        const { error: defUpdateError } = await supabase.from("imputados").update(defPayload).eq("id", def.dbId);
+        if (defUpdateError) {
+          console.error("Error actualizando imputado:", defUpdateError);
+          setDialog({
+            title: "No se pudo guardar el imputado",
+            message: "El expediente se guardó, pero uno de los imputados no pudo actualizarse. Revise la conexión e intente nuevamente.",
+            variant: "danger",
+            confirmLabel: "Aceptar",
+            onConfirm: () => setDialog(null),
+          });
+          return;
+        }
+      } else {
+        const { data: insertedDef, error: defInsertError } = await supabase.from("imputados").insert(defPayload).select().single();
+        if (defInsertError) {
+          console.error("Error insertando imputado:", defInsertError);
+          setDialog({
+            title: "No se pudo guardar el imputado",
+            message: "El expediente se guardó, pero uno de los imputados nuevos no pudo registrarse. Revise la conexión e intente nuevamente.",
+            variant: "danger",
+            confirmLabel: "Aceptar",
+            onConfirm: () => setDialog(null),
+          });
+          return;
+        }
+        if (insertedDef?.id) {
+          setDefs(prev => prev.map(item => item.id === def.id ? { ...item, dbId: firstText(insertedDef.id) } : item));
+        }
+      }
+    }
+
+    for (const vic of vics) {
+      const vicPayload = {
+        expediente_id: caseRecord?.id ?? null,
+        numero_expediente: nextCaseNumber,
+        tipo_persona: vic.tipo,
+        nombre_completo: vic.nombre,
+        imputado_relacionado: defs[0]?.nombre ?? "",
+        delito: firstText(caseRecord?.delito_principal),
+      };
+
+      if (vic.dbId) {
+        const { error: vicUpdateError } = await supabase.from("victimas").update(vicPayload).eq("id", vic.dbId);
+        if (vicUpdateError) {
+          console.error("Error actualizando víctima:", vicUpdateError);
+          setDialog({
+            title: "No se pudo guardar la víctima",
+            message: "El expediente se guardó, pero una víctima no pudo actualizarse. Revise la conexión e intente nuevamente.",
+            variant: "danger",
+            confirmLabel: "Aceptar",
+            onConfirm: () => setDialog(null),
+          });
+          return;
+        }
+      } else {
+        const { data: insertedVic, error: vicInsertError } = await supabase.from("victimas").insert(vicPayload).select().single();
+        if (vicInsertError) {
+          console.error("Error insertando víctima:", vicInsertError);
+          setDialog({
+            title: "No se pudo guardar la víctima",
+            message: "El expediente se guardó, pero una víctima nueva no pudo registrarse. Revise la conexión e intente nuevamente.",
+            variant: "danger",
+            confirmLabel: "Aceptar",
+            onConfirm: () => setDialog(null),
+          });
+          return;
+        }
+        if (insertedVic?.id) {
+          setVics(prev => prev.map(item => item.id === vic.id ? { ...item, dbId: firstText(insertedVic.id) } : item));
+        }
+      }
+    }
+
     await logAuditEvent({
       usuario: currentUser.username,
       accion: "EDITAR_EXPEDIENTE",
@@ -2687,7 +2856,7 @@ function CaseDetailView({
       confirmLabel: "Aceptar",
       onConfirm: () => {
         setDialog(null);
-        setView("cases");
+        setView(returnToView);
       },
     });
   };
@@ -2765,14 +2934,29 @@ function CaseDetailView({
         return;
       }
 
-      setDefs(prev => [...prev, { ...newDef, id: firstId(Date.now(), data?.id) }]);
+      setDefs(prev => [...prev, { ...newDef, id: firstId(Date.now(), data?.id), dbId: firstText(data?.id) }]);
     } else {
       setDefs(prev => [...prev, { ...newDef, id: Date.now() }]);
     }
     setNewDef({ ...EMPTY_DEF });
     setShowDefModal(false);
   };
-  const removeDef = (id: number) => setDefs(prev => prev.filter(d => d.id !== id));
+  const updateDefField = (id: number, key: keyof Omit<DefEntry, "id" | "dbId">, value: string | boolean) => {
+    setDefs(prev => prev.map(def => def.id === id ? { ...def, [key]: value } as DefEntry : def));
+  };
+
+  const removeDef = async (id: number) => {
+    const target = defs.find(d => d.id === id);
+    if (!target) return;
+    if (activeCaseId && target.dbId) {
+      const { error } = await supabase.from("imputados").delete().eq("id", target.dbId);
+      if (error) {
+        console.error("Error eliminando imputado:", error);
+        return;
+      }
+    }
+    setDefs(prev => prev.filter(d => d.id !== id));
+  };
 
   // ── Victims state ──
   const [vics, setVics] = useState<VicEntry[]>([]);
@@ -2796,14 +2980,29 @@ function CaseDetailView({
         return;
       }
 
-      setVics(prev => [...prev, { id: firstId(Date.now(), data?.id), ...newVic }]);
+      setVics(prev => [...prev, { id: firstId(Date.now(), data?.id), dbId: firstText(data?.id), ...newVic }]);
     } else {
       setVics(prev => [...prev, { id: Date.now(), ...newVic }]);
     }
     setNewVic({ tipo: "Persona Física", nombre: "" });
     setShowVicModal(false);
   };
-  const removeVic = (id: number) => setVics(prev => prev.filter(v => v.id !== id));
+  const updateVicField = (id: number, key: keyof Omit<VicEntry, "id" | "dbId">, value: string) => {
+    setVics(prev => prev.map(vic => vic.id === id ? { ...vic, [key]: value } as VicEntry : vic));
+  };
+
+  const removeVic = async (id: number) => {
+    const target = vics.find(v => v.id === id);
+    if (!target) return;
+    if (activeCaseId && target.dbId) {
+      const { error } = await supabase.from("victimas").delete().eq("id", target.dbId);
+      if (error) {
+        console.error("Error eliminando víctima:", error);
+        return;
+      }
+    }
+    setVics(prev => prev.filter(v => v.id !== id));
+  };
 
   // ── Measures state ──
   const [measures, setMeasures] = useState({ arresto: false, roja: false, migratoria: false, policia: false });
@@ -2852,6 +3051,7 @@ function CaseDetailView({
       if (active) {
         const loadedDefs = (imputadoRows ?? []).map(mapImputadoRow).map(row => ({
           id: row.id,
+          dbId: row.dbId,
           tipo: row.sexo === "Persona Jurídica" ? "Persona Jurídica" : "Persona Física",
           nombre: row.nombre,
           doc: row.doc,
@@ -2889,6 +3089,7 @@ function CaseDetailView({
       if (active) {
         setVics((victimRows ?? []).map((row, idx) => ({
           id: firstId(idx + 1, row.id),
+          dbId: firstText(row.id),
           tipo: firstText(row.tipo_persona, "Persona Física"),
           nombre: firstText(row.nombre_completo, row.nombre),
         })));
@@ -3269,22 +3470,22 @@ function CaseDetailView({
                     )}
                   </div>
                   <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <Sel label="Tipo de Entidad" value={d.tipo} options={["Persona Física", "Persona Jurídica"]} />
-                    <Field label="Nombre completo" value={d.nombre} required />
-                    <Field label="Documento de Identidad" value={d.doc} required />
-                    <Field label="Edad" value={d.edad} type="number" />
-                    <Sel label="Sexo" value={d.sexo} options={SEXOS} />
-                    <Sel label="Nacionalidad" value={d.nac} options={NACIONALIDADES} />
-                    <Sel label="Estatus del Imputado" value={d.estadoImp} options={ESTADOS_IMPUTADO} />
-                    <Sel label="Estatus Judicial" value={d.estadoJud} options={ESTADOS_JUDICIALES} />
-                    <Sel label="Centro Penitenciario" value={d.centro} options={["N/A", ...CENTROS_PENITENCIARIOS]} />
-                    <Field label="Pena Impuesta (años)" value={d.penaImp} type="number" />
-                    <Field label="Pena Privativa (años)" value={d.penaPriv} type="number" />
-                    <Field label="Pena Suspendida (años)" value={d.penaSusp} type="number" />
-                    <Field label="Indemnización (RD$)" value={d.indemnizacion} />
-                    <Field label="Garantía Económica (RD$)" value={d.garantia} />
-                    <Field label="Multa (RD$)" value={d.multa} />
-                    <div className="sm:col-span-2 lg:col-span-3"><Field label="Decomiso" value={d.decomiso} /></div>
+                    <Sel label="Tipo de Entidad" value={d.tipo} options={["Persona Física", "Persona Jurídica"]} onChange={value => updateDefField(d.id, "tipo", value)} />
+                    <Field label="Nombre completo" value={d.nombre} required onChange={value => updateDefField(d.id, "nombre", value)} />
+                    <Field label="Documento de Identidad" value={d.doc} required onChange={value => updateDefField(d.id, "doc", value)} />
+                    <Field label="Edad" value={d.edad} type="number" onChange={value => updateDefField(d.id, "edad", value)} />
+                    <Sel label="Sexo" value={d.sexo} options={SEXOS} onChange={value => updateDefField(d.id, "sexo", value)} />
+                    <Sel label="Nacionalidad" value={d.nac} options={NACIONALIDADES} onChange={value => updateDefField(d.id, "nac", value)} />
+                    <Sel label="Estatus del Imputado" value={d.estadoImp} options={ESTADOS_IMPUTADO} onChange={value => updateDefField(d.id, "estadoImp", value)} />
+                    <Sel label="Estatus Judicial" value={d.estadoJud} options={ESTADOS_JUDICIALES} onChange={value => updateDefField(d.id, "estadoJud", value)} />
+                    <Sel label="Centro Penitenciario" value={d.centro} options={["N/A", ...CENTROS_PENITENCIARIOS]} onChange={value => updateDefField(d.id, "centro", value)} />
+                    <Field label="Pena Impuesta (años)" value={d.penaImp} type="number" onChange={value => updateDefField(d.id, "penaImp", value)} />
+                    <Field label="Pena Privativa (años)" value={d.penaPriv} type="number" onChange={value => updateDefField(d.id, "penaPriv", value)} />
+                    <Field label="Pena Suspendida (años)" value={d.penaSusp} type="number" onChange={value => updateDefField(d.id, "penaSusp", value)} />
+                    <Field label="Indemnización (RD$)" value={d.indemnizacion} onChange={value => updateDefField(d.id, "indemnizacion", value)} />
+                    <Field label="Garantía Económica (RD$)" value={d.garantia} onChange={value => updateDefField(d.id, "garantia", value)} />
+                    <Field label="Multa (RD$)" value={d.multa} onChange={value => updateDefField(d.id, "multa", value)} />
+                    <div className="sm:col-span-2 lg:col-span-3"><Field label="Decomiso" value={d.decomiso} onChange={value => updateDefField(d.id, "decomiso", value)} /></div>
                   </div>
                   <div className="border-t border-border px-4 py-3 bg-muted/20">
                     <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Medidas activas</p>
@@ -3330,8 +3531,8 @@ function CaseDetailView({
                     )}
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <Sel label="Tipo de Persona" value={v.tipo} options={["Persona Física", "Persona Jurídica"]} />
-                    <Field label="Nombre / Razón Social" value={v.nombre} required />
+                    <Sel label="Tipo de Persona" value={v.tipo} options={["Persona Física", "Persona Jurídica"]} onChange={value => updateVicField(v.id, "tipo", value)} />
+                    <Field label="Nombre / Razón Social" value={v.nombre} required onChange={value => updateVicField(v.id, "nombre", value)} />
                   </div>
                 </div>
               ))}
@@ -4981,8 +5182,18 @@ function AuditView() {
 
 // ─── Defendants View ──────────────────────────────────────────────────────────
 
-function DefendantsView({ setView, openAddImputado }: { setView: (v: View) => void; openAddImputado: (caseId: string) => void }) {
-  const [defs, setDefs] = useState<typeof defendants>([]);
+function DefendantsView({
+  setView,
+  openAddImputado,
+  openEditImputado,
+  openCase,
+}: {
+  setView: (v: View) => void;
+  openAddImputado: (caseId: string) => void;
+  openEditImputado: (caseId: string) => void;
+  openCase: (caseId: string, mode?: "detail" | "form") => void;
+}) {
+  const [defs, setDefs] = useState<DefEntry[]>([]);
   const [caseOptions, setCaseOptions] = useState<typeof recentCases>([]);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("Todos");
@@ -5054,6 +5265,10 @@ function DefendantsView({ setView, openAddImputado }: { setView: (v: View) => vo
     );
   }, [caseOptions, caseSearch]);
 
+  const sentenceByCase = useMemo(() => {
+    return new Map(caseOptions.map(c => [c.id, c.sentencia]));
+  }, [caseOptions]);
+
   const handleOpenAddDefFlow = () => {
     setCaseSearch("");
     setSelectedCaseForDef("");
@@ -5120,9 +5335,9 @@ function DefendantsView({ setView, openAddImputado }: { setView: (v: View) => vo
             ))}
           </div>
           <div className="ml-auto flex gap-2">
-            <Btn variant="secondary" icon={Download} size="sm" onClick={() => downloadExcel(
-              ["Nombre", "Documento", "Estatus", "Est. Judicial", "Expediente"],
-              filtered.map(d => [d.nombre, d.doc, d.estatus, d.estJud, d.exp]),
+          <Btn variant="secondary" icon={Download} size="sm" onClick={() => downloadExcel(
+              ["Expediente", "No. Sentencia / Resolución", "Nombre", "Documento", "Sexo", "Estatus", "Est. Judicial"],
+              filtered.map(d => [d.exp, sentenceByCase.get(d.exp) || "—", d.nombre, d.doc, d.sexo, d.estatus, d.estJud]),
               "imputados.xls"
             )}>Exportar</Btn>
           </div>
@@ -5130,12 +5345,29 @@ function DefendantsView({ setView, openAddImputado }: { setView: (v: View) => vo
       </div>
       <div className="bg-card border border-border rounded-lg overflow-hidden">
         <Table
-          headers={["Nombre", "Documento", "Edad", "Sexo", "Estatus", "Est. Judicial", "Alerta R.", "Alert. Mig.", "Arresto", "PN", "Expediente", "Acciones"]}
+          columnClasses={[
+            "min-w-[150px]",
+            "min-w-[170px]",
+            "min-w-[220px]",
+            "min-w-[180px]",
+            "w-[80px]",
+            "w-[130px]",
+            "w-[120px]",
+            "w-[140px]",
+            "w-[80px]",
+            "w-[90px]",
+            "w-[80px]",
+            "w-[70px]",
+            "w-[110px]",
+          ]}
+          headers={["Expediente", "No. Sentencia / Resolución", "Nombre", "Documento", "Edad", "Sexo", "Estatus", "Est. Judicial", "Alerta R.", "Alert. Mig.", "Arresto", "PN", "Acciones"]}
           rows={filtered.map(d => {
             const Chk = ({ v, cls }: { v: boolean; cls: string }) => (
               <span className={`w-5 h-5 flex items-center justify-center rounded-full ${v ? cls : "bg-muted text-muted-foreground"}`}>{v ? <CheckSquare size={10} /> : <X size={10} />}</span>
             );
             return [
+              <span className="font-mono text-xs text-primary cursor-pointer hover:underline" onClick={() => openCase(d.exp)}>{d.exp}</span>,
+              <span className="font-mono text-xs text-muted-foreground">{sentenceByCase.get(d.exp) || "—"}</span>,
               <span className="font-medium text-foreground text-sm">{d.nombre}</span>,
               <span className="font-mono text-xs text-muted-foreground">{d.doc}</span>,
               <span className="font-mono text-xs">{d.edad || "N/A"}</span>,
@@ -5146,10 +5378,9 @@ function DefendantsView({ setView, openAddImputado }: { setView: (v: View) => vo
               <Chk v={d.alertaMig} cls="bg-indigo-100 text-indigo-600 dark:bg-indigo-900/25" />,
               <Chk v={d.ordenArresto} cls="bg-amber-100 text-amber-600 dark:bg-amber-900/25" />,
               <Chk v={d.policia} cls="bg-teal-100 text-teal-600 dark:bg-teal-900/25" />,
-              <span className="font-mono text-xs text-primary cursor-pointer hover:underline" onClick={() => setView("case-detail")}>{d.exp}</span>,
               <div className="flex gap-1">
-                <button title="Ver expediente" className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" onClick={() => setView("case-detail")}><Eye size={13} /></button>
-                <button title="Editar imputado" className="p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 text-muted-foreground hover:text-blue-600 transition-colors" onClick={() => setView("case-form")}><Edit2 size={13} /></button>
+                <button title="Ver expediente" className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" onClick={() => openCase(d.exp)}><Eye size={13} /></button>
+                <button title="Editar imputado" className="p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 text-muted-foreground hover:text-blue-600 transition-colors" onClick={() => openEditImputado(d.exp)}><Edit2 size={13} /></button>
                 <button title="Eliminar imputado" className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-600 transition-colors" onClick={() => setDeleteId(d.id)}><Trash2 size={13} /></button>
               </div>
             ];
@@ -5507,6 +5738,16 @@ function VictimsView({ setView, currentUser }: { setView: (v: View) => void; cur
           </div>
         ) : (
           <Table
+            columnClasses={[
+              "w-[70px]",
+              "min-w-[220px]",
+              "min-w-[140px]",
+              "min-w-[170px]",
+              "min-w-[180px]",
+              "min-w-[160px]",
+              "w-[110px]",
+              "w-[110px]",
+            ]}
             headers={["#", "Nombre / Razón Social", "Tipo", "Expediente", "Imputado Relacionado", "Delito", "Fecha Reg.", "Acciones"]}
             rows={filtered.map(v => [
               <span className="font-mono text-xs text-muted-foreground">{v.id}</span>,
@@ -7087,6 +7328,261 @@ function SettingsView({ dark, setDark }: { dark: boolean; setDark: (b: boolean) 
   );
 }
 
+// ─── Profile View ────────────────────────────────────────────────────────────
+
+function ProfileView({ currentUser }: { currentUser: SessionUser }) {
+  const [passwordForm, setPasswordForm] = useState({ current: "", next: "", confirm: "" });
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNext, setShowNext] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [dialog, setDialog] = useState<null | {
+    title: string;
+    message: string;
+    variant?: "info" | "danger";
+    confirmLabel?: string;
+    cancelLabel?: string;
+    onConfirm: () => void;
+    onCancel?: () => void;
+  }>(null);
+
+  const hasChanges = useMemo(() => (
+    passwordForm.current.trim() !== "" ||
+    passwordForm.next.trim() !== "" ||
+    passwordForm.confirm.trim() !== ""
+  ), [passwordForm]);
+
+  const resetForm = useCallback(() => {
+    setPasswordForm({ current: "", next: "", confirm: "" });
+    setShowCurrent(false);
+    setShowNext(false);
+    setShowConfirm(false);
+    setError("");
+  }, []);
+
+  const requestCancel = useCallback(() => {
+    if (!hasChanges) {
+      resetForm();
+      return;
+    }
+
+    setDialog({
+      title: "Cancelar cambios",
+      message: "Si sales ahora, se perderán los datos que ya digitaste para el cambio de contraseña.",
+      variant: "danger",
+      confirmLabel: "Sí, cancelar",
+      cancelLabel: "Volver",
+      onConfirm: () => {
+        setDialog(null);
+        resetForm();
+      },
+      onCancel: () => setDialog(null),
+    });
+  }, [hasChanges, resetForm]);
+
+  const confirmPasswordChange = useCallback(() => {
+    setError("");
+
+    if (passwordForm.current.trim().length < 1) {
+      setError("Debes colocar tu contraseña actual para confirmar el cambio.");
+      return;
+    }
+
+    if (passwordForm.next.length < 8) {
+      setError("La nueva contraseña debe tener mínimo 8 caracteres.");
+      return;
+    }
+
+    if (passwordForm.next !== passwordForm.confirm) {
+      setError("Las contraseñas no coinciden.");
+      return;
+    }
+
+    setDialog({
+      title: "Confirmar cambio de contraseña",
+      message: "Se actualizará la contraseña de tu cuenta institucional. Asegúrate de haber guardado la nueva clave en un lugar seguro.",
+      variant: "info",
+      confirmLabel: "Sí, actualizar",
+      cancelLabel: "Cancelar",
+      onConfirm: async () => {
+        setDialog(null);
+        setSaving(true);
+        setError("");
+
+        try {
+          const { error: verifyError } = await supabase.auth.signInWithPassword({
+            email: currentUser.email,
+            password: passwordForm.current,
+          });
+
+          if (verifyError) {
+            throw new Error("La contraseña actual no coincide.");
+          }
+
+          const { error: updateError } = await supabase.auth.updateUser({ password: passwordForm.next });
+          if (updateError) {
+            throw new Error(updateError.message || "No fue posible actualizar la contraseña.");
+          }
+
+          resetForm();
+          setDialog({
+            title: "Contraseña actualizada",
+            message: "Tu contraseña fue actualizada correctamente.",
+            variant: "info",
+            confirmLabel: "Aceptar",
+            onConfirm: () => setDialog(null),
+          });
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "No fue posible actualizar la contraseña.");
+        } finally {
+          setSaving(false);
+        }
+      },
+      onCancel: () => setDialog(null),
+    });
+  }, [currentUser.email, passwordForm.confirm, passwordForm.current, passwordForm.next, resetForm]);
+
+  const inputCls = "w-full px-3 py-2.5 text-sm bg-input-background border border-border rounded-md outline-none focus:ring-1 focus:ring-ring text-foreground placeholder:text-muted-foreground/60";
+  const labelCls = "text-[11px] font-semibold uppercase tracking-wider text-muted-foreground";
+
+  return (
+    <div className="p-6">
+      <SectionHeader
+        title="Perfil"
+        sub="Datos básicos de la sesión actual y cambio seguro de contraseña."
+      />
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="xl:col-span-1 bg-card border border-border rounded-lg p-5">
+          <div className="flex items-center gap-4 mb-5">
+            <div className="w-14 h-14 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-lg font-bold shadow-sm">
+              {currentUser.initials}
+            </div>
+            <div className="min-w-0">
+              <p className="text-lg font-semibold text-foreground truncate">{currentUser.name}</p>
+              <p className="text-sm text-muted-foreground truncate">{currentUser.role}</p>
+            </div>
+          </div>
+          <div className="space-y-3 text-sm">
+            <div className="rounded-lg border border-border p-3">
+              <p className={labelCls}>Correo institucional</p>
+              <p className="text-foreground mt-1 break-all">{currentUser.email}</p>
+            </div>
+            <div className="rounded-lg border border-border p-3">
+              <p className={labelCls}>Nombre del usuario</p>
+              <p className="text-foreground mt-1">{currentUser.name}</p>
+            </div>
+            <div className="rounded-lg border border-border p-3">
+              <p className={labelCls}>Usuario</p>
+              <p className="text-foreground mt-1 font-mono">{currentUser.username}</p>
+            </div>
+            <div className="rounded-lg border border-border p-3">
+              <p className={labelCls}>ID del usuario</p>
+              <p className="text-foreground mt-1 font-mono text-xs break-all">{currentUser.id}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="xl:col-span-2 bg-card border border-border rounded-lg p-5">
+          <div className="flex items-start justify-between gap-4 mb-5">
+            <div>
+              <h3 className="text-base font-semibold text-foreground">Cambiar contraseña</h3>
+              <p className="text-sm text-muted-foreground mt-1">Usa una clave segura y confirma antes de guardar.</p>
+            </div>
+            <Btn variant="secondary" onClick={requestCancel}>Limpiar</Btn>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className={labelCls}>Contraseña actual</label>
+              <div className="relative mt-1">
+                <input
+                  type={showCurrent ? "text" : "password"}
+                  value={passwordForm.current}
+                  onChange={e => setPasswordForm(p => ({ ...p, current: e.target.value }))}
+                  className={inputCls}
+                  placeholder="Ingrese su clave actual"
+                  autoComplete="current-password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCurrent(v => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showCurrent ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className={labelCls}>Nueva contraseña</label>
+              <div className="relative mt-1">
+                <input
+                  type={showNext ? "text" : "password"}
+                  value={passwordForm.next}
+                  onChange={e => setPasswordForm(p => ({ ...p, next: e.target.value }))}
+                  className={inputCls}
+                  placeholder="Mínimo 8 caracteres"
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNext(v => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showNext ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className={labelCls}>Confirmar contraseña</label>
+              <div className="relative mt-1">
+                <input
+                  type={showConfirm ? "text" : "password"}
+                  value={passwordForm.confirm}
+                  onChange={e => setPasswordForm(p => ({ ...p, confirm: e.target.value }))}
+                  className={inputCls}
+                  placeholder="Repita la contraseña"
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirm(v => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {error && (
+            <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {error}
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2 justify-end mt-6">
+            <Btn variant="secondary" onClick={requestCancel}>Cancelar</Btn>
+            <Btn onClick={confirmPasswordChange}>{saving ? "Actualizando..." : "Actualizar contraseña"}</Btn>
+          </div>
+        </div>
+      </div>
+
+      <ActionDialog
+        open={dialog !== null}
+        title={dialog?.title ?? ""}
+        message={dialog?.message ?? ""}
+        variant={dialog?.variant ?? "info"}
+        confirmLabel={dialog?.confirmLabel ?? "Aceptar"}
+        cancelLabel={dialog?.cancelLabel}
+        onConfirm={dialog?.onConfirm ?? (() => setDialog(null))}
+        onCancel={dialog?.onCancel}
+      />
+    </div>
+  );
+}
+
 // ─── Catalogs View ────────────────────────────────────────────────────────────
 
 function CatalogsView() {
@@ -7282,7 +7778,7 @@ const VIEW_TITLES: Record<View, string> = {
   "case-form": "Editar Expediente", "case-new": "Nuevo Expediente", defendants: "Imputados", victims: "Víctimas",
   measures: "Medidas y Alertas", documents: "Documentos", reports: "Reportes",
   analytics: "Analítica", notifications: "Notificaciones", users: "Usuarios y Roles", audit: "Auditoría",
-  catalogs: "Catálogos", settings: "Configuración",
+  catalogs: "Catálogos", settings: "Configuración", profile: "Perfil",
 };
 
 // ─── App ──────────────────────────────────────────────────────────────────────
@@ -7295,6 +7791,7 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [caseFormStartTab, setCaseFormStartTab] = useState(0);
   const [autoOpenAddDefModal, setAutoOpenAddDefModal] = useState(false);
+  const [caseFormReturnView, setCaseFormReturnView] = useState<View>("cases");
   const [selectedCaseId, setSelectedCaseId] = useState("");
   const [selectedDefendantCaseId, setSelectedDefendantCaseId] = useState("");
   const [selectedNotificationCaseId, setSelectedNotificationCaseId] = useState("");
@@ -7445,6 +7942,17 @@ export default function App() {
     setSelectedDefendantCaseId(caseId);
     setCaseFormStartTab(1);
     setAutoOpenAddDefModal(true);
+    setCaseFormReturnView("defendants");
+    navigate("case-form");
+  }, [navigate]);
+
+  const openEditImputadoFromDefendants = useCallback((caseId: string) => {
+    setSelectedCaseId("");
+    setSelectedNotificationCaseId("");
+    setSelectedDefendantCaseId(caseId);
+    setCaseFormStartTab(1);
+    setAutoOpenAddDefModal(false);
+    setCaseFormReturnView("defendants");
     navigate("case-form");
   }, [navigate]);
 
@@ -7454,6 +7962,7 @@ export default function App() {
     setSelectedNotificationCaseId("");
     setCaseFormStartTab(0);
     setAutoOpenAddDefModal(false);
+    setCaseFormReturnView("cases");
     navigate(mode === "form" ? "case-form" : "case-detail");
   }, [navigate]);
 
@@ -7463,6 +7972,7 @@ export default function App() {
     setSelectedNotificationCaseId(caseId);
     setCaseFormStartTab(0);
     setAutoOpenAddDefModal(false);
+    setCaseFormReturnView("notifications");
     navigate("case-form");
   }, [navigate]);
 
@@ -7485,6 +7995,7 @@ export default function App() {
           mode="form"
           currentUser={currentUser}
           canEditCases={canEditCases}
+          returnToView={caseFormReturnView}
           initialTab={caseFormStartTab}
           autoOpenAddDefModal={autoOpenAddDefModal}
           selectedCaseId={selectedNotificationCaseId || selectedDefendantCaseId || selectedCaseId}
@@ -7492,13 +8003,14 @@ export default function App() {
         />
       );
       case "case-new": return canCreateCases ? <NewCaseView setView={navigate} currentUser={currentUser} /> : <DashboardView setView={navigate} />;
-      case "defendants": return <DefendantsView setView={navigate} openAddImputado={openAddImputadoFromDefendants} />;
+      case "defendants": return <DefendantsView setView={navigate} openCase={openCaseFromList} openAddImputado={openAddImputadoFromDefendants} openEditImputado={openEditImputadoFromDefendants} />;
       case "victims": return <VictimsView setView={navigate} currentUser={currentUser} />;
       case "measures": return <MeasuresView setView={navigate} currentUser={currentUser} />;
       case "documents": return <DocumentsView setView={navigate} currentUser={currentUser} />;
       case "notifications": return <NotificationsView openCaseFromNotification={openCaseFromNotification} />;
       case "reports": return <ReportsView />;
       case "analytics": return <AnalyticsView />;
+      case "profile": return currentUser ? <ProfileView currentUser={currentUser} /> : <DashboardView setView={navigate} />;
       case "users": return <UsersView />;
       case "audit": return <AuditView />;
       case "catalogs": return <CatalogsView />;
