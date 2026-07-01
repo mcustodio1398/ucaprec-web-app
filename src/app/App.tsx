@@ -273,10 +273,12 @@ const mapExpedienteRow = (row: DbRow, idx: number): typeof recentCases[number] &
 const mapImputadoRow = (row: DbRow, idx: number): DefEntry => ({
   id: firstId(idx + 1, row.id, row.imputado_id),
   dbId: firstText(row.id, row.imputado_id),
+  tipo: firstText(row.tipo_persona, row.tipo, firstBool(row.rnc, row.razon_social) ? "Persona Jurídica" : "Persona Física"),
   nombre: firstText(row.nombre_completo, row.nombre, row.razon_social),
   doc: firstText(row.documento, row.cedula, row.rnc, row.identificacion),
   edad: firstText(row.edad, row.age, ""),
   sexo: firstText(row.sexo, row.genero, row.sexo_registrado, row.sexo_persona, "Sin dato"),
+  nac: firstText(row.nacionalidad, row.nac, row.pais, "N/A"),
   estadoImp: firstText(row.estado_imputado, row.estatus, row.estado),
   estadoJud: firstText(row.estado_judicial, row.estatus_judicial),
   centro: firstText(row.centro_penitenciario, row.centro, row.penal),
@@ -290,6 +292,7 @@ const mapImputadoRow = (row: DbRow, idx: number): DefEntry => ({
   alertaRoja: firstBool(row.alerta_roja, row.alerta_interpol),
   alertaMig: firstBool(row.alerta_migratoria),
   ordenArresto: firstBool(row.orden_arresto),
+  subidoPN: firstBool(row.subido_pn, row.subido_a_pn, row.policia),
   policia: firstBool(row.subido_pn, row.subido_a_pn, row.policia),
   exp: firstText(row.numero_expediente, row.expediente, row.expediente_id),
   estatus: firstText(row.estado_imputado, row.estatus, row.estado),
@@ -5874,7 +5877,7 @@ function MeasuresView({ setView, currentUser }: { setView: (v: View) => void; cu
 
   const [measures, setMeasures] = useState<MeasureEntry[]>([]);
   const [caseOptions, setCaseOptions] = useState<typeof recentCases>([]);
-  const [defendantOptions, setDefendantOptions] = useState<typeof defendants>([]);
+  const [defendantOptions, setDefendantOptions] = useState<DefEntry[]>([]);
   const [search, setSearch] = useState("");
   const [filterTipo, setFilterTipo] = useState("Todos");
   const [filterActiva, setFilterActiva] = useState("Activas");
